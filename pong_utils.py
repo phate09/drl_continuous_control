@@ -148,7 +148,7 @@ def collect_trajectories(envs, policy, tmax=200, nrand=5):
         action_list.append(action)
         
         # stop if any of the trajectories is done
-        # we want all the lists to be retangular
+        # we want all the lists to be rectangular
         if is_done.any():
             break
 
