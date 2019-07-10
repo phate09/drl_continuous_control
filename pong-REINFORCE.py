@@ -18,6 +18,8 @@ device = pong_utils.device
 print("using device: ", device)
 
 env = gym.make('PongDeterministic-v4')
+
+
 class Policy(nn.Module):
 
     def __init__(self):
@@ -53,7 +55,7 @@ class Policy(nn.Module):
 
 # policy = Policy().to(device)
 policy = pong_utils.Policy().to(device)
-policy = torch.load('REINFORCE.policy')
+policy = torch.load('REINFORCE2.policy')
 
 optimizer = optim.Adam(policy.parameters(), lr=1e-4)
 envs = pong_utils.parallelEnv('PongDeterministic-v4', n=4, seed=12345)
@@ -164,7 +166,7 @@ timer.finish()
 pong_utils.play(env, policy, time=2000)
 plt.plot(mean_rewards)
 # save your policy!
-torch.save(policy, 'REINFORCE2.policy')
+torch.save(policy, 'REINFORCE3.policy')
 
 # load your policy if needed
 # policy = torch.load('REINFORCE.policy')

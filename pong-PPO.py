@@ -3,7 +3,6 @@
 import argparse
 
 import gym
-import matplotlib.pyplot as plt
 import numpy as np
 import progressbar as pb
 import torch
@@ -11,6 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from scipy import stats
+from torchtest import test_suite, VariablesChangeException
 from visdom import Visdom
 
 import pong_utils
@@ -54,6 +54,8 @@ viz = Visdom(port=FLAGS.port, server=FLAGS.server)
 assert viz.check_connection(timeout_seconds=3), 'No connection could be formed quickly, remember to run \'visdom\' in the terminal'
 
 viz.close(win=COST)
+
+
 # set up a convolutional neural net
 # the output is the probability of moving right
 # P(left) = 1-P(right)
@@ -61,46 +63,44 @@ class Policy(nn.Module):
 
     def __init__(self):
         super(Policy, self).__init__()
-        # 80x80 to outputsize x outputsize
-        # outputsize = (inputsize - kernel_size + stride)/stride
-        # (round up if not an integer)
-        self.conv1 = nn.Conv2d(2, 1, kernel_size=2, stride=1)
-        # size (80-2)/1 +1 = 79
+        # 80x80x2 to 38x38x4
+        # 2 channel from the stacked frame
+        self.conv1 = nn.Conv2d(2, 4, kernel_size=6, stride=1, bias=False)
         self.max1 = nn.MaxPool2d(2)
-        # size 39
-        self.conv2 = nn.Conv2d(1, 1, kernel_size=2, stride=1)
+        # 38x38x4 to 9x9x32
+        self.conv2 = nn.Conv2d(4, 16, kernel_size=6, stride=2)
         self.max2 = nn.MaxPool2d(2)
-        # size 19
-        # output = 20x20 here
-        self.conv3 = nn.Conv2d(1, 1, kernel_size=2, stride=1)
-        self.max3 = nn.MaxPool2d(2)
-        # size 9
-        self.size = 1 * 9 * 9
+        self.size = 8 * 8 * 16
 
-        # 1 fully connected layer
-        self.fc = nn.Linear(self.size, 1)
+        # two fully connected layer
+        self.fc1 = nn.Linear(self.size, 256)
+        self.fc2 = nn.Linear(256, 1)
+
+        # Sigmoid to
         self.sig = nn.Sigmoid()
 
     def forward(self, x):
         x = self.max1(F.relu(self.conv1(x)))
         x = self.max2(F.relu(self.conv2(x)))
-        x = self.max3(F.relu(self.conv3(x)))
-        # flatten the tensor
+
         x = x.view(-1, self.size)
-        return self.sig(self.fc(x))
+        x = F.relu(self.fc1(x))
+        return self.sig(self.fc2(x))
 
 
 # run your own policy!
-policy=Policy().to(device)
+policy = Policy().to(device)
 # policy = pong_utils.Policy().to(device)
-policy = torch.load('PPO2.policy')
+# policy = torch.load('PPO2.policy')
 optimizer = optim.Adam(policy.parameters(), lr=1e-4)
 
-pong_utils.play(env, policy, time=200)
+# pong_utils.play(env, policy, time=200)
 
 
 def clipped_surrogate(policy, old_probs, states, actions, rewards,
                       discount=0.995, epsilon=0.1, beta=0.01):
+    surrogate = pong_utils.clipped_surrogate(policy, old_probs, states, actions, rewards, discount, epsilon, beta)
+    return surrogate
     actions = torch.tensor(actions, dtype=torch.int8, device=device)
     old_probs = torch.tensor(old_probs, dtype=torch.float, device=device)
     # discount = discount ** np.arange(len(rewards))
@@ -158,7 +158,8 @@ SGD_epoch = 4
 
 # keep track of progress
 mean_rewards = []
-
+tested = False
+vars_change = True  # for checking that variables have changed after training
 for e in range(episode):
 
     # collect trajectories
@@ -172,9 +173,31 @@ for e in range(episode):
         L = -clipped_surrogate(policy, old_probs, states, actions, rewards, epsilon=epsilon, beta=beta)
 
         # L = -pong_utils.clipped_surrogate(policy, old_probs, states, actions, rewards,epsilon=epsilon, beta=beta)
+        if not tested:
+            params = [np for np in policy.named_parameters() if np[1].requires_grad]
+            # take a copy
+            initial_params = [(name, p.clone()) for (name, p) in params]
         optimizer.zero_grad()
         L.backward()
         optimizer.step()
+        if not tested:
+            tested = True  # executes the test only once
+            # check if variables have changed
+            for (_, p0), (name, p1) in zip(initial_params, params):
+                try:
+                    if vars_change:
+                        assert not torch.equal(p0.to(device), p1.to(device))
+                    else:
+                        assert torch.equal(p0.to(device), p1.to(device))
+                except AssertionError:
+                    raise VariablesChangeException(  # error message
+                        "{var_name} {msg}".format(
+                            var_name=name,
+                            msg='did not change!' if vars_change else 'changed!'
+                        )
+                    )
+            print('test passed')
+
         del L
 
     # the clipping parameter reduces as time goes on
