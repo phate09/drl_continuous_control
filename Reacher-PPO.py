@@ -5,6 +5,7 @@ from collections import deque
 import numpy as np
 from tensorboardX import SummaryWriter
 from unityagents import UnityEnvironment
+
 from agents.RandomAgent import RandomAgent
 
 
@@ -47,6 +48,7 @@ def main():
 
         for i_episode in range(n_episodes):
             env_info = env.reset(train_mode=True)[brain_name]  # reset the environment
+            agent.reset()  # reset the agent
             state = env_info.vector_observations[0]  # get the current state
             score = 0
             for t in range(max_t):
@@ -55,11 +57,12 @@ def main():
                 next_state = env_info.vector_observations[0]  # get the next state
                 reward = env_info.rewards[0]  # get the reward
                 done = env_info.local_done[0]  # see if episode has finished
-                agent.step(state, action, reward, next_state, done)
+                agent.collect(state, action, reward, next_state, done)
                 state = next_state
                 score += reward
                 if done:
                     break
+            agent.learn()
             scores_window.append(score)  # save most recent score
             scores.append(score)  # save most recent score
             writer.add_scalar('data/score', score, i_episode)
