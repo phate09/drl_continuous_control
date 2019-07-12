@@ -19,9 +19,9 @@ class RandomAgent(GenericAgent):
             seed (int): random seed
         """
         super().__init__(config)
-        self.state_size = config[constants.INPUT_DIM]
-        self.action_size = config[constants.OUTPUT_DIM]
-        self.seed = random.seed(config[constants.SEED])
+        self.input_dim = config[constants.input_dim]
+        self.output_dim = config[constants.output_dim]
+        self.seed = random.seed(config[constants.seed])
 
     def collect(self, state, action, reward, next_state, done):
         pass
@@ -48,14 +48,14 @@ class RandomAgent(GenericAgent):
         pass
 
     def required_properties(self):
-        return [constants.INPUT_DIM, constants.OUTPUT_DIM, constants.SEED]
+        return [constants.input_dim, constants.output_dim, constants.seed]
 
     def reset(self):
         pass
 
 
 if __name__ == '__main__':
-    agent = RandomAgent({constants.INPUT_DIM: 1,
-                         constants.OUTPUT_DIM: 1,
-                         constants.SEED: 0})
+    agent = RandomAgent({constants.input_dim: 1,
+                         constants.output_dim: 1,
+                         constants.seed: 0})
     print('Test passed')

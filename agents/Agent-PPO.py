@@ -5,11 +5,14 @@ import numpy as np
 import torch
 from scipy import stats
 
+import constants
+from agents.GenericAgent import GenericAgent
 
-class AgentPPO():
+
+class AgentPPO(GenericAgent):
     """Interacts with and learns from the environment."""
 
-    def __init__(self, state_size, action_size, seed):
+    def __init__(self, config):
         """Initialize an Agent object.
 
         Params
@@ -18,12 +21,14 @@ class AgentPPO():
             action_size (int): dimension of each action
             seed (int): random seed
         """
-        self.state_size = state_size
-        self.action_size = action_size
-        self.seed = random.seed(seed)
+        super().__init__(config)
+        self.input_dim: int = config[constants.input_dim]
+        self.output_dim: int = config[constants.output_dim]
+        self.seed: int = random.seed(config[constants.seed])
+        self.discount: float = config[constants.discount]
+        self.device = config[constants.device]
+        self.model = config[constants.model]
 
-        # Initialize time step (for updating every UPDATE_EVERY steps)
-        self.t_step = 0
         self.state_list = []
         self.action_list = []
         self.prob_list = []
@@ -57,6 +62,20 @@ class AgentPPO():
             experiences (Tuple[torch.Variable]): tuple of (s, a, r, s', done) tuples
             gamma (float): discount factor
         """
+        rewards = self.reward_list.copy()
+        rewards.reverse()
+        previous_rewards = 0
+        for i in range(len(rewards)):
+            rewards[i] = rewards[i] + self.discount * previous_rewards
+            previous_rewards = rewards[i]
+        rewards.reverse()
+        rewards_standardised = stats.zscore(rewards, axis=1)
+        rewards_standardised = np.nan_to_num(rewards_standardised, False)
+        assert not np.isnan(rewards_standardised).any()
+        rewards_standardised = torch.tensor(rewards_standardised, dtype=torch.float, device=self.device)
+        states = torch.stack(self.state_list)
+        output = self.model(states)
+
         pass
 
     def reset(self):
@@ -111,7 +130,6 @@ class AgentPPO():
                 # torch.save(agent.qnetwork_local.state_dict(), 'checkpoint.pth') #save the agent
                 break
         return scores
-
 
 # def clipped_surrogate(policy, old_probs, states, actions, rewards,
 #                       discount=0.995, epsilon=0.1, beta=0.01):
@@ -200,6 +218,6 @@ class AgentPPO():
 #         if is_done.any():
 #             break
 
-    # # return pi_theta, states, actions, rewards, probability
-    # return prob_list, state_list, \
-    #        action_list, reward_list
+# # return pi_theta, states, actions, rewards, probability
+# return prob_list, state_list, \
+#        action_list, reward_list

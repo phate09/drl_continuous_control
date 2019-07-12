@@ -1,5 +1,6 @@
 class GenericAgent:
     """Super class for a generic agent, ensures that some properties are set when instantiating the agent"""
+
     def __init__(self, config):
         self.check_required_properties(config, self.required_properties())
 
@@ -9,3 +10,7 @@ class GenericAgent:
 
     def required_properties(self):
         return []
+
+    def update_from_config(self, config: dict):
+        for key in config.keys():
+            setattr(self, key, config[key])
