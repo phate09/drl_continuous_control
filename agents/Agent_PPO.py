@@ -225,7 +225,7 @@ class AgentPPO(GenericAgent):
 
         # cost = torch.log(new_probs) * rewards_standardised
         ratio = new_probs / old_probs
-        cost = torch.min(ratio, torch.clamp(ratio, 1 - epsilon, i + epsilon)) * rewards_standardised
+        cost = torch.min(ratio, torch.clamp(ratio, 1 - epsilon, 1 + epsilon)) * rewards_standardised
         # include a regularization term
         # this steers new_policy towards 0.5
         # which prevents policy to become exactly 0 or 1
