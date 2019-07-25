@@ -128,7 +128,7 @@ SGD_epoch = 4
 mean_rewards = []
 tested = False
 vars_change = True  # for checking that variables have changed after training
-viz.line(X=list(range(len(mean_rewards))), Y=mean_rewards, win=COST, name=dt_string, opts=dict(title='Cost plot'), update='new')  # generates a new trace
+# viz.line(X=list(range(len(mean_rewards))), Y=mean_rewards, win=COST, name=dt_string, opts=dict(title='Cost plot'), update='new')  # generates a new trace
 for e in range(episode):
 
     # collect trajectories

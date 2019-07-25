@@ -1,9 +1,11 @@
+import os
 from collections import deque
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchtest
 
 import constants
 from agents.GenericAgent import GenericAgent
@@ -35,6 +37,7 @@ class AgentPPO(GenericAgent):
         self.model: torch.nn.Module = config[constants.model]
         self.optimiser: torch.optim.Optimizer = config[constants.optimiser]
         self.ending_condition = config[constants.ending_condition]
+        self.log_dir = config[constants.log_dir]
         self.n_games = 1
 
     # self.t_update_target_step = 0
@@ -99,21 +102,18 @@ class AgentPPO(GenericAgent):
         epsilon = self.epsilon
         beta = self.beta
         for i_episode in range(self.n_episodes):
-            env_info = env.reset(train_mode=True)[brain_name]  # reset the environment
+            state = env.reset()  # reset the environment
             # Reset the memory of the agent
             state_list = []
             action_list = []
             prob_list = []
             reward_list = []
-            state = env_info.vector_observations[0]  # get the current state
+            # state = env_info.vector_observations[0]  # get the current state
             score = 0
             for t in range(self.max_t):
                 state = torch.tensor(state, dtype=torch.float, device=self.device)
                 action, log_prob, entropy = self.model(state)
-                env_info = env.step(action.cpu().numpy())[brain_name]  # send the action to the environment
-                next_state = torch.tensor(env_info.vector_observations[0])  # get the next state
-                reward = env_info.rewards[0]  # get the reward
-                done = env_info.local_done[0]  # see if episode has finished
+                next_state, reward, done, _ = env.step(action.cpu().numpy())  # send the action to the environment
                 state_list.append(state)
                 action_list.append(action)
                 prob_list.append(log_prob)
@@ -152,11 +152,12 @@ class AgentPPO(GenericAgent):
             print(
                 f'\rEpisode {i_episode + 1}\tAverage Score: {np.mean(scores_window):.2f} ', end="")
             if i_episode + 1 % 100 == 0:
-                print(f'\rEpisode {i_episode + 1}\tAverage Score: {np.mean(scores_window):.2f} ')
-            # torch.save(self.model, os.path.join(log_dir, "checkpoint.pth"))
+                print(f'\rEpisode {i_episode + 1}\tAverage Score: {np.mean(scores_window):.2f} epsilon: {epsilon:.5f} beta: {beta:.5f}')
+                torch.save(self.model, os.path.join(self.log_dir, f"checkpoint_{i_episode + 1}.pth"))
             result = {"mean": np.mean(scores_window)}
             if ending_condition(result):
                 print(f'\nEnvironment solved in {i_episode - 100:d} episodes!\tAverage Score: {np.mean(scores_window):.2f}')
+                torch.save(self.model, os.path.join(self.log_dir, f"complete_{i_episode + 1}.pth"))
                 # torch.save(agent.qnetwork_local.state_dict(), 'checkpoint.pth') #save the agent
                 break
         return scores
@@ -168,8 +169,9 @@ class AgentPPO(GenericAgent):
 
         # cost = torch.log(new_probs) * rewards_standardised
         ratio = torch.exp(log_prob - torch.tensor(old_log_probs, device=self.device))
-        cost = torch.min(ratio, torch.clamp(ratio, 1 - epsilon, 1 + epsilon)) * rewards_standardised
-        my_surrogate = torch.mean(cost + beta * entropy)
+        ratio_clamped = torch.clamp(ratio, 1 - epsilon, 1 + epsilon)
+        advantage = torch.min(ratio, ratio_clamped) * rewards_standardised
+        my_surrogate = torch.mean(advantage + beta * entropy)
         return my_surrogate
 
 
@@ -188,6 +190,19 @@ class Policy(nn.Module):
         dist = torch.distributions.Normal(output, F.softplus(self.std))
         actions = dist.sample()
         log_prob = dist.log_prob(actions)
-        log_prob = torch.sum(log_prob, dim=-1)
-        entropy = torch.sum(dist.entropy(), dim=-1)
+        # log_prob = torch.sum(log_prob, dim=-1)
+        entropy = dist.entropy()  # torch.sum(dist.entropy(), dim=-1)
         return actions, log_prob, entropy
+
+    def test(self, device='cpu'):
+        input = torch.randn(10, 2, requires_grad=False)
+        targets = torch.rand(10, 1, requires_grad=False)
+        torchtest.test_suite(self, mse_surrogate, torch.optim.Adam(self.parameters()), batch=[input, targets], test_vars_change=True, test_inf_vals=False, test_nan_vals=False, device=device)
+        print('All tests passed')
+
+
+def mse_surrogate(input, target):
+    """just for testing that the weights get updated"""
+    adv_PPO, entropy = input[1], input[2]
+    loss_actor = -torch.mean(adv_PPO) - 0.01 * entropy.mean()
+    return loss_actor

@@ -9,6 +9,7 @@ import numpy as np
 import torch
 import torch.optim as optim
 from tensorboardX import SummaryWriter
+from agents.Agent_PPO_OpenAI_continuous import Policy as Policy3
 
 import constants
 import pong_utils
@@ -30,15 +31,15 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 np.random.seed(0)
 
-policy = Policy2().to(device)
+policy = Policy3(input_dim=2,output_dim=1).to(device)
 policy.test(device)
 # policy = pong_utils.Policy().to(device)
 # policy = torch.load('PPO2.policy')
 optimizer = optim.Adam(policy.parameters(), lr=1e-4)
-ending_condition = lambda result: result['mean'] >= 30.0
+ending_condition = lambda result: result['mean'] >= 90.0
 config = {constants.optimiser: optimizer,
           constants.model: policy,
-          constants.n_episodes: 2000,
+          constants.n_episodes: 4000,
           constants.max_t: 200,
           constants.epsilon: 0.1,
           constants.beta: 0.01,
@@ -50,8 +51,8 @@ config = {constants.optimiser: optimizer,
           constants.ending_condition: ending_condition
           }
 agent = AgentPPO(config)
-envs = parallelEnv('PongDeterministic-v4', n=8, seed=1234)
-comment = f"PPO PongDeterministic"
+envs = parallelEnv('MountainCarContinuous-v0', n=8, seed=1234)
+comment = f"PPO MountainCarContinuous-v0"
 log_dir = os.path.join('runs', current_time + '_' + comment)
 os.mkdir(log_dir)
 config_file = open(os.path.join(log_dir, "config.json"), "w+")
