@@ -1,21 +1,23 @@
 import torch
-import torch.distributions
 import torchtest
 from torch import nn as nn
 from torch.nn import functional as F
 
 
-class Policy(nn.Module):
+class Policy_actor(nn.Module):
     def __init__(self, input_dim, output_dim):
         super().__init__()
         self.fc1 = nn.Linear(input_dim, 64)
+        # self.bn1 = nn.BatchNorm1d(64)
         self.fc2 = nn.Linear(64, 64)
+        # self.bn2 = nn.BatchNorm1d(64)
         self.fc3 = nn.Linear(64, output_dim)
+        # self.bn3 = nn.BatchNorm1d(64)
         self.std = nn.Parameter(torch.ones(output_dim))
 
     def forward(self, x):
-        output = F.relu(self.fc1(x))
-        output = torch.tanh(self.fc2(output))
+        output = F.relu(self.fc1(x))  # self.bn1(
+        output = torch.tanh(self.fc2(output))  # self.bn2(
         output = self.fc3(output)
         dist = torch.distributions.Normal(output, F.softplus(self.std))
         actions = dist.sample()
