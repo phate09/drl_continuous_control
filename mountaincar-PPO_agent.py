@@ -9,7 +9,7 @@ import numpy as np
 import torch
 import torch.optim as optim
 from tensorboardX import SummaryWriter
-from agents.Agent_PPO_OpenAI_continuous import Policy as Policy3
+from networks.Policy_continuous import Policy as Policy3
 
 import constants
 import pong_utils

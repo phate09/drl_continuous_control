@@ -3,13 +3,15 @@ import os
 from datetime import datetime
 
 import gym
+import jsonpickle
 import numpy as np
 import torch
 import torch.optim as optim
 from tensorboardX import SummaryWriter
 
 import constants
-from agents.Agent_PPO_OpenAI_continuous import AgentPPO, Policy
+from agents.Agent_PPO_OpenAI_continuous import AgentPPO
+from networks.Policy_continuous import Policy
 
 
 def main():
@@ -64,8 +66,7 @@ def main():
               constants.log_dir: log_dir
               }
     config_file = open(os.path.join(log_dir, "config.json"), "w+")
-    # magic happens here to make it pretty-printed
-    config_file.write(json.dumps(config, indent=4, sort_keys=True,cls=ConfigJSONEncoder, default=lambda o: '<not serializable>'))
+    config_file.write(json.dumps(json.loads(jsonpickle.encode(config, unpicklable=False, max_depth=1)), indent=4, sort_keys=True))
     config_file.close()
     writer = SummaryWriter(log_dir=log_dir)
     agent = AgentPPO(config)
