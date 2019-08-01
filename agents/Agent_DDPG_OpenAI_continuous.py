@@ -55,17 +55,6 @@ class AgentDDPG(GenericAgent):
                 constants.optimiser,
                 constants.ending_condition]
 
-    def act(self, state=None):
-        """Returns actions for given state as per current policy.
-
-        Params
-        ======
-            state (array_like): current state
-            eps (float): epsilon, for epsilon-greedy action selection
-        """
-
-        return np.random.rand(self.action_size)
-
     def learn(self, state_list, prob_list, reward_list, epsilon, beta):
         """Update value parameters using given batch of experience tuples.
 

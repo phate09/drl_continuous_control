@@ -8,17 +8,19 @@ class Policy_actor(nn.Module):
     def __init__(self, input_dim, output_dim):
         super().__init__()
         self.fc1 = nn.Linear(input_dim, 64)
-        # self.bn1 = nn.BatchNorm1d(64)
+        self.bn1 = nn.BatchNorm1d(64)
         self.fc2 = nn.Linear(64, 64)
-        # self.bn2 = nn.BatchNorm1d(64)
+        self.bn2 = nn.BatchNorm1d(64)
         self.fc3 = nn.Linear(64, output_dim)
-        # self.bn3 = nn.BatchNorm1d(64)
+        self.bn3 = nn.BatchNorm1d(output_dim)
         self.std = nn.Parameter(torch.ones(output_dim))
 
     def forward(self, x):
-        output = F.relu(self.fc1(x))  # self.bn1(
-        output = torch.tanh(self.fc2(output))  # self.bn2(
-        output = self.fc3(output)
+        output: torch.Tensor = F.relu(self.bn1(self.fc1(x)))  # self.bn1(
+        output: torch.Tensor = F.relu(self.bn2(self.fc2(output)))  # self.bn2(
+        output: torch.Tensor = torch.tanh(self.bn3(self.fc3(output)))  # self.bn2(
+        output: torch.Tensor = output.mul(5.0)
+        # output = self.fc3(output)
         dist = torch.distributions.Normal(output, F.softplus(self.std))
         actions = dist.sample()
         log_prob = dist.log_prob(actions)
@@ -38,3 +40,7 @@ def mse_surrogate(input, target):
     adv_PPO, entropy = input[1], input[2]
     loss_actor = -torch.mean(adv_PPO) - 0.01 * entropy.mean()
     return loss_actor
+
+if __name__ == '__main__':
+    model = Policy_actor(33,4)
+    torch.rand()
