@@ -11,6 +11,7 @@ import constants
 from agents.Agent_PPO_continuous import AgentPPO
 from networks.actor_critic.Policy_actor import Policy_actor
 # from environment.Reacher_wrapper import Reacher_wrapper
+from networks.actor_critic.Policy_critic import Policy_critic
 
 
 def main():
@@ -28,16 +29,18 @@ def main():
     action_size = brain.vector_action_space_size
     state_size = brain.vector_observation_space_size
     action_type = brain.vector_action_space_type
-    comment = f"PPO Unity Reacher"
-    policy = Policy_actor(state_size, action_size).to(device)
-    # policy.test(device)
-    optimizer = optim.Adam(policy.parameters(), lr=1e-4)
-    # optimizer = optim.RMSprop(policy.parameters(),lr=1e-4)
+    comment = f"DDPG Unity Reacher"
+    actor = Policy_actor(state_size, action_size).to(device)
+    critic = Policy_critic(state_size).to(device)
+    # actor.test(device)
+    optimizer = optim.Adam(actor.parameters(), lr=1e-4)
+    # optimizer = optim.RMSprop(actor.parameters(),lr=1e-4)
     ending_condition = lambda result: result['mean'] >= 30.0
     log_dir = os.path.join('runs', current_time + '_' + comment)
     os.mkdir(log_dir)
     config = {constants.optimiser: optimizer,
-              constants.model: policy,
+              constants.model_actor: actor,
+              constants.model_critic: critic,
               constants.n_episodes: 2000 * 8,
               constants.max_t: 1000,
               constants.epsilon: 0.2,

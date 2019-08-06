@@ -10,7 +10,7 @@ import torch.optim as optim
 from tensorboardX import SummaryWriter
 
 import constants
-from agents.Agent_PPO_OpenAI_continuous import AgentPPO
+from agents.OpenAI.Agent_PPO_OpenAI_continuous import AgentPPO
 from networks.Policy_continuous import Policy
 
 
