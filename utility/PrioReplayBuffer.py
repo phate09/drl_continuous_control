@@ -2,7 +2,7 @@ import numpy as np
 
 
 class PrioReplayBuffer:
-    def __init__(self, capacity, alpha=0.6):
+    def __init__(self, capacity: int, alpha=0.6):
         self.prob_alpha = alpha
         self.capacity = capacity
         self.pos = 0

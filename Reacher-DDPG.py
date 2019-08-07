@@ -1,14 +1,16 @@
 import json
 import os
 from datetime import datetime
+
 import jsonpickle
 import numpy as np
 import torch
 import torch.optim as optim
 from tensorboardX import SummaryWriter
 from unityagents import UnityEnvironment
+
 import constants
-from agents.Agent_PPO_continuous import AgentPPO
+from agents.Unity.Agent_DDPG import AgentDDPG
 from networks.actor_critic.Policy_actor import Policy_actor
 # from environment.Reacher_wrapper import Reacher_wrapper
 from networks.actor_critic.Policy_critic import Policy_critic
@@ -22,7 +24,7 @@ def main():
     print("using device: ", device)
     seed = 5
     np.random.seed(seed)
-    env = UnityEnvironment("./environment/Reacher_Linux_NoVis/Reacher.x86_64",seed=seed)
+    env = UnityEnvironment("./environment/Reacher_Linux_NoVis/Reacher.x86_64", seed=seed)
     brain = env.brains[env.brain_names[0]]
     env_info = env.reset(train_mode=True)[env.brain_names[0]]
     print('Number of agents:', len(env_info.agents))
@@ -33,31 +35,34 @@ def main():
     actor = Policy_actor(state_size, action_size).to(device)
     critic = Policy_critic(state_size).to(device)
     # actor.test(device)
-    optimizer = optim.Adam(actor.parameters(), lr=1e-4)
+    optimizer_actor = optim.Adam(actor.parameters(), lr=1e-4)
+    optimizer_critic = optim.Adam(critic.parameters(), lr=1e-4)
     # optimizer = optim.RMSprop(actor.parameters(),lr=1e-4)
     ending_condition = lambda result: result['mean'] >= 30.0
     log_dir = os.path.join('runs', current_time + '_' + comment)
     os.mkdir(log_dir)
-    config = {constants.optimiser: optimizer,
-              constants.model_actor: actor,
-              constants.model_critic: critic,
-              constants.n_episodes: 2000 * 8,
-              constants.max_t: 1000,
-              constants.epsilon: 0.2,
-              constants.beta: 0.01,
-              constants.input_dim: state_size,
-              constants.output_dim: action_size,
-              constants.discount: 0.99,
-              constants.device: device,
-              constants.sgd_iterations: 6,
-              constants.ending_condition: ending_condition,
-              constants.log_dir: log_dir
-              }
+    config = {
+        constants.optimiser_actor: optimizer_actor,
+        constants.optimiser_critic: optimizer_critic,
+        constants.model_actor: actor,
+        constants.model_critic: critic,
+        constants.n_episodes: 2000 * 8,
+        constants.max_t: 1000,
+        constants.epsilon: 0.2,
+        constants.beta: 0.01,
+        constants.input_dim: state_size,
+        constants.output_dim: action_size,
+        constants.discount: 0.99,
+        constants.device: device,
+        constants.sgd_iterations: 6,
+        constants.ending_condition: ending_condition,
+        constants.log_dir: log_dir
+    }
     config_file = open(os.path.join(log_dir, "config.json"), "w+")
     config_file.write(json.dumps(json.loads(jsonpickle.encode(config, unpicklable=False, max_depth=1)), indent=4, sort_keys=True))
     config_file.close()
     writer = SummaryWriter(log_dir=log_dir)
-    agent = AgentPPO(config)
+    agent = AgentDDPG(config)
     agent.train(env, writer, ending_condition)
     print("Finished.")
 
