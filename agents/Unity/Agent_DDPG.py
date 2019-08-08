@@ -26,7 +26,6 @@ class AgentDDPG(GenericAgent):
         super().__init__(config)
         self.input_dim: int = config[constants.input_dim]
         self.output_dim: int = config[constants.output_dim]
-        # self.seed: int = random.seed(config[constants.seed])
         self.max_t: int = config[constants.max_t]
         self.sgd_iterations: int = config[constants.sgd_iterations]
         self.n_episodes: int = config[constants.n_episodes]
@@ -46,7 +45,7 @@ class AgentDDPG(GenericAgent):
         self.n_games = 1
         self.train_every = config[constants.train_every]
         self.train_n_times = config[constants.train_n_times]
-        self.replay_buffer = PrioReplayBuffer(1000)
+        self.replay_buffer = PrioReplayBuffer(int(1e5))
 
     # self.t_update_target_step = 0
     def required_properties(self):
@@ -79,27 +78,27 @@ class AgentDDPG(GenericAgent):
         next_states = torch.stack(next_states)
         is_values = torch.from_numpy(is_values).to(self.device)
         dones = torch.tensor(dones, dtype=torch.float, device=self.device).unsqueeze(1)
-        suggested_target_next_actions = self.target_actor(next_states)
-        suggested_actions = self.actor(states)
-        target_critic_next_input = torch.cat((next_states, suggested_target_next_actions), dim=1)
-        critic_input = torch.cat((states, actions), dim=1)
-        suggested_critic_input = torch.cat((states, suggested_actions), dim=1)
-        y = rewards + self.gamma * self.target_critic(target_critic_next_input) * (torch.ones_like(dones) - dones)  # sets 0 to the entries which are done
-        states_value = self.critic(critic_input)
-        suggested_actions_states_value = self.critic(suggested_critic_input)
+        target_mu_sprime = self.target_actor(next_states)
+        mu_s = self.actor(states)
+        target_sprime_target_mu_sprime = torch.cat((next_states, target_mu_sprime), dim=1)
+        s_a = torch.cat((states, actions), dim=1)
+        s_mu_s = torch.cat((states, mu_s), dim=1)
+        y = rewards + self.gamma * self.target_critic(target_sprime_target_mu_sprime) * (torch.ones_like(dones) - dones)  # sets 0 to the entries which are done
+        Qs_a = self.critic(s_a)
+        Qs_mu_s = self.critic(s_mu_s)
 
         self.critic.train()
         self.actor.train()
-        td_error = y.detach() - states_value
+        td_error = y.detach() - Qs_a
         self.replay_buffer.update_priorities(indexes, abs(td_error))
-        loss_critic = 0.5 * (td_error).pow(2) * is_values.detach()
+        loss_critic = td_error.pow(2) * is_values.detach()
         self.optimiser_critic.zero_grad()
-        loss_critic.mean().backward()
-        torch.nn.utils.clip_grad_norm(self.critic.parameters(), 1)
+        loss_critic.mean().backward(retain_graph=True)
+        torch.nn.utils.clip_grad_norm_(self.critic.parameters(), 1)
         self.optimiser_critic.step()
-        loss_actor = suggested_actions * suggested_actions_states_value
+        loss_actor = -Qs_mu_s  # gradient ascent # mu_s *
         self.optimiser_actor.zero_grad()
-        loss_actor.mean().backward()
+        loss_actor.mean().backward(retain_graph=True)
         self.optimiser_actor.step()
         self.critic.eval()
         self.actor.eval()
@@ -149,6 +148,8 @@ class AgentDDPG(GenericAgent):
             self.critic.eval()
             for t in range(self.max_t):
                 action: torch.Tensor = self.actor(state.unsqueeze(dim=0))
+                noise = ((1 + 1) * torch.rand_like(action) - 1)  # adds exploratory noise
+                action = torch.clamp(action + noise, -1, 1)  # clips the action to the allowed boundaries
                 env_info = env.step(action.cpu().detach().numpy())[brain_name]  # send the action to the environment
                 next_state = torch.tensor(env_info.vector_observations[0], dtype=torch.float, device=self.device)  # get the next state
                 reward = env_info.rewards[0]  # get the reward
@@ -176,9 +177,10 @@ class AgentDDPG(GenericAgent):
                 self.replay_buffer.push((state, action, reward, next_state, done), abs(td_errors[i].item()))
 
             # train the agent
-            if len(self.replay_buffer) > self.batch_size and i_episode % self.train_every == 0:
-                experiences, indexes, is_values = self.replay_buffer.sample(self.batch_size)
-                self.learn(experiences=experiences, indexes=indexes, is_values=is_values)
+            if len(self.replay_buffer) > self.batch_size and i_episode != 0 and i_episode % self.train_every == 0:
+                for i in range(self.train_n_times):
+                    experiences, indexes, is_values = self.replay_buffer.sample(self.batch_size)
+                    self.learn(experiences=experiences, indexes=indexes, is_values=is_values)
             scores_window.append(score)  # save most recent score
             scores.append(score)  # save most recent score
             writer.add_scalar('data/score', score, i_episode)
@@ -203,7 +205,7 @@ class AgentDDPG(GenericAgent):
         rewards = torch.tensor(reward_list).unsqueeze(dim=1).to(self.device)
         suggested_next_action = self.target_actor(stacked_next_states).to(self.device)
         concat_next_states = torch.cat([stacked_next_states, suggested_next_action], dim=1).to(self.device)
-        td_errors = rewards + self.target_critic(concat_next_states) - self.critic(concat_states)
+        td_errors = rewards + self.gamma * self.target_critic(concat_next_states) - self.critic(concat_states)
         return td_errors  # calculate the td-errors, maybe use GAE
 
     def calculate_discounted_rewards(self, reward_list: list) -> np.ndarray:
@@ -216,13 +218,3 @@ class AgentDDPG(GenericAgent):
         rewards.reverse()
         rewards_array = np.asanyarray(rewards)
         return rewards_array
-
-    def clipped_surrogate(self, old_log_probs, states, rewards_standardised, discount=0.995, epsilon=0.1, beta=0.01):
-        # convert states to policy (or probability)
-
-        actions, log_prob, entropy = self.model(states)
-        # cost = torch.log(new_probs) * rewards_standardised
-        ratio = torch.exp(log_prob - old_log_probs)
-        cost = torch.min(ratio, torch.clamp(ratio, 1 - epsilon, 1 + epsilon))
-        my_surrogate = -torch.mean(cost) * rewards_standardised  # + beta * entropy
-        return my_surrogate

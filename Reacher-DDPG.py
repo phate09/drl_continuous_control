@@ -22,7 +22,8 @@ def main():
     current_time = now.strftime('%b%d_%H-%M-%S')
     device = device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print("using device: ", device)
-    seed = 5
+    seed = 2
+    torch.manual_seed(seed)
     np.random.seed(seed)
     env = UnityEnvironment("./environment/Reacher_Linux_NoVis/Reacher.x86_64", seed=seed)
     brain = env.brains[env.brain_names[0]]
@@ -55,8 +56,8 @@ def main():
         constants.gamma: 0.99,
         constants.tau: 0.01,
         constants.device: device,
-        constants.train_every: 20,
-        constants.train_n_times: 10,
+        constants.train_every: 4,
+        constants.train_n_times: 4,
         constants.sgd_iterations: 6,
         constants.ending_condition: ending_condition,
         constants.log_dir: log_dir
