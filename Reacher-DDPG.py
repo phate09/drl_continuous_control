@@ -25,7 +25,7 @@ def main():
     seed = 2
     torch.manual_seed(seed)
     np.random.seed(seed)
-    env = UnityEnvironment("./environment/Reacher_Linux_NoVis/Reacher.x86_64", seed=seed)
+    env = UnityEnvironment("./environment/Reacher_Linux_NoVis/Reacher.x86_64",worker_id=0, seed=seed)
     brain = env.brains[env.brain_names[0]]
     env_info = env.reset(train_mode=True)[env.brain_names[0]]
     print('Number of agents:', len(env_info.agents))
@@ -54,10 +54,10 @@ def main():
         constants.input_dim: state_size,
         constants.output_dim: action_size,
         constants.gamma: 0.99,
-        constants.tau: 0.01,
+        constants.tau: 0.001,
         constants.device: device,
-        constants.train_every: 4,
-        constants.train_n_times: 4,
+        constants.train_every: 20,
+        constants.train_n_times: 10,
         constants.sgd_iterations: 6,
         constants.ending_condition: ending_condition,
         constants.log_dir: log_dir

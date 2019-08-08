@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim.optimizer
+from tensorboardX import SummaryWriter
 
 import constants
 from agents.GenericAgent import GenericAgent
@@ -43,6 +44,8 @@ class AgentDDPG(GenericAgent):
         self.ending_condition = config[constants.ending_condition]
         self.batch_size = 1024
         self.n_games = 1
+        self.beta_start = 0.4
+        self.beta_end = 1
         self.train_every = config[constants.train_every]
         self.train_n_times = config[constants.train_n_times]
         self.replay_buffer = PrioReplayBuffer(int(1e5))
@@ -99,6 +102,7 @@ class AgentDDPG(GenericAgent):
         loss_actor = -Qs_mu_s  # gradient ascent # mu_s *
         self.optimiser_actor.zero_grad()
         loss_actor.mean().backward(retain_graph=True)
+        torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 1)
         self.optimiser_actor.step()
         self.critic.eval()
         self.actor.eval()
@@ -118,7 +122,7 @@ class AgentDDPG(GenericAgent):
         for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
             target_param.data.copy_(tau * local_param.data + (1.0 - tau) * target_param.data)
 
-    def train(self, env, writer, ending_condition):
+    def train(self, env, writer: SummaryWriter, ending_condition):
         """
 
         :param env:
@@ -132,8 +136,6 @@ class AgentDDPG(GenericAgent):
         brain_name = env.brain_names[0]
         scores = []  # list containing scores from each episode
         scores_window = deque(maxlen=100)  # last 100 scores
-        epsilon = self.epsilon
-        beta = self.beta
         for i_episode in range(self.n_episodes):
             env_info = env.reset(train_mode=True)[brain_name]  # reset the environment
             # Reset the memory of the agent
@@ -178,13 +180,15 @@ class AgentDDPG(GenericAgent):
 
             # train the agent
             if len(self.replay_buffer) > self.batch_size and i_episode != 0 and i_episode % self.train_every == 0:
+                beta = (self.beta_end - self.beta_start) * i_episode / self.n_episodes + self.beta_start
                 for i in range(self.train_n_times):
-                    experiences, indexes, is_values = self.replay_buffer.sample(self.batch_size)
+                    experiences, indexes, is_values = self.replay_buffer.sample(self.batch_size, beta=beta)
                     self.learn(experiences=experiences, indexes=indexes, is_values=is_values)
             scores_window.append(score)  # save most recent score
             scores.append(score)  # save most recent score
             writer.add_scalar('data/score', score, i_episode)
             writer.add_scalar('data/score_average', np.mean(scores_window), i_episode)
+            writer.flush()
             print(
                 f'\rEpisode {i_episode + 1}\tAverage Score: {np.mean(scores_window):.2f} ', end="")
             if i_episode + 1 % 100 == 0:
