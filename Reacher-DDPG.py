@@ -33,7 +33,7 @@ def main():
     action_type = brain.vector_action_space_type
     comment = f"DDPG Unity Reacher"
     actor = Policy_actor(state_size, action_size).to(device)
-    critic = Policy_critic(state_size).to(device)
+    critic = Policy_critic(state_size + action_size).to(device)
     # actor.test(device)
     optimizer_actor = optim.Adam(actor.parameters(), lr=1e-4)
     optimizer_critic = optim.Adam(critic.parameters(), lr=1e-4)
@@ -46,14 +46,17 @@ def main():
         constants.optimiser_critic: optimizer_critic,
         constants.model_actor: actor,
         constants.model_critic: critic,
-        constants.n_episodes: 2000 * 8,
-        constants.max_t: 1000,
+        constants.n_episodes: 2000,
+        constants.max_t: 2000,  # just > 1000
         constants.epsilon: 0.2,
         constants.beta: 0.01,
         constants.input_dim: state_size,
         constants.output_dim: action_size,
-        constants.discount: 0.99,
+        constants.gamma: 0.99,
+        constants.tau: 0.01,
         constants.device: device,
+        constants.train_every: 20,
+        constants.train_n_times: 10,
         constants.sgd_iterations: 6,
         constants.ending_condition: ending_condition,
         constants.log_dir: log_dir

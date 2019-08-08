@@ -9,7 +9,7 @@ from tensorboardX import SummaryWriter
 from unityagents import UnityEnvironment
 import constants
 from agents.Agent_PPO_continuous import AgentPPO
-from networks.actor_critic.Policy_actor import Policy_actor
+from networks.actor_critic.actorPPO import Policy_actor
 # from environment.Reacher_wrapper import Reacher_wrapper
 
 

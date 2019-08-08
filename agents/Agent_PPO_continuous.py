@@ -126,13 +126,14 @@ class AgentPPO(GenericAgent):
                 previous_rewards = rewards[i]
             rewards.reverse()
             rewards_array = np.asanyarray(rewards)
-            mns = rewards_array.mean()
-            sstd = rewards_array.std() + 1e-6
-            rewards_standardised = (rewards_array - mns) / sstd
-            rewards_standardised = np.nan_to_num(rewards_standardised, False)
-            assert not np.isnan(rewards_standardised).any()
-            rewards_standardised = torch.tensor(rewards_standardised, dtype=torch.float, device=self.device)
-            reward_list = rewards_standardised
+            # mns = rewards_array.mean()
+            # sstd = rewards_array.std() + 1e-6
+            # rewards_standardised = (rewards_array - mns) / sstd
+            # rewards_standardised = np.nan_to_num(rewards_standardised, False)
+            # assert not np.isnan(rewards_standardised).any()
+            # rewards_standardised = torch.tensor(rewards_standardised, dtype=torch.float, device=self.device)
+            # reward_list = rewards_standardised
+            reward_list = torch.from_numpy(rewards_array).float().to(self.device)
             self.learn(state_list, prob_list, reward_list, epsilon=epsilon, beta=beta)
             # the clipping parameter reduces as time goes on
             epsilon *= .999

@@ -20,7 +20,7 @@ class Policy_actor(nn.Module):
         output: torch.Tensor = F.relu(self.bn1(self.fc1(x)))
         output: torch.Tensor = F.relu(self.bn2(self.fc2(output)))
         output: torch.Tensor = torch.tanh(self.bn3(self.fc3(output)))
-        output: torch.Tensor = output.mul(5.0)
+        # output: torch.Tensor = output.mul(5.0)
         return output
 
     def test(self, device='cpu'):

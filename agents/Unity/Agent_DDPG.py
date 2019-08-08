@@ -1,14 +1,17 @@
+import pickle
 from collections import deque
 
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.optim.optimizer
 
 import constants
 from agents.GenericAgent import GenericAgent
+from utility.PrioReplayBuffer import PrioReplayBuffer
 
 
-class AgentPPO(GenericAgent):
+class AgentDDPG(GenericAgent):
     """Interacts with and learns from the environment."""
 
     def __init__(self, config):
@@ -27,32 +30,41 @@ class AgentPPO(GenericAgent):
         self.max_t: int = config[constants.max_t]
         self.sgd_iterations: int = config[constants.sgd_iterations]
         self.n_episodes: int = config[constants.n_episodes]
-        self.discount: float = config[constants.discount]
+        self.gamma: float = config[constants.gamma]
         self.epsilon: float = config[constants.epsilon]
         self.beta: float = config[constants.beta]
+        self.tau: float = config[constants.tau]
         self.device = config[constants.device]
         self.actor: torch.nn.Module = config[constants.model_actor]
         self.critic: torch.nn.Module = config[constants.model_critic]
-        self.optimiser_actor: torch.optim.Optimizer = config[constants.optimiser]
-        self.optimiser_critic: torch.optim.Optimizer = config[constants.optimiser]
+        self.target_actor: torch.nn.Module = pickle.loads(pickle.dumps(self.actor))  # clones the actor
+        self.target_critic: torch.nn.Module = pickle.loads(pickle.dumps(self.critic))  # clones the critic
+        self.optimiser_actor: torch.optim.optimizer.Optimizer = config[constants.optimiser_actor]
+        self.optimiser_critic: torch.optim.optimizer.Optimizer = config[constants.optimiser_critic]
         self.ending_condition = config[constants.ending_condition]
+        self.batch_size = 1024
         self.n_games = 1
+        self.train_every = config[constants.train_every]
+        self.train_n_times = config[constants.train_n_times]
+        self.replay_buffer = PrioReplayBuffer(1000)
 
     # self.t_update_target_step = 0
     def required_properties(self):
         return [constants.input_dim,
                 constants.output_dim,
                 constants.max_t,
-                constants.sgd_iterations,
                 constants.n_episodes,
-                constants.discount,
+                constants.gamma,
                 constants.beta,
+                constants.tau,
                 constants.device,
-                constants.model,
-                constants.optimiser,
+                constants.model_actor,
+                constants.model_critic,
+                constants.optimiser_actor,
+                constants.optimiser_critic,
                 constants.ending_condition]
 
-    def learn(self, state_list, prob_list, reward_list, epsilon, beta):
+    def learn(self, experiences, indexes, is_values):
         """Update value parameters using given batch of experience tuples.
 
         Params
@@ -60,24 +72,52 @@ class AgentPPO(GenericAgent):
             experiences (Tuple[torch.Variable]): tuple of (s, a, r, s', done) tuples
             gamma (float): discount factor
         """
-        old_log_prob = torch.stack(prob_list, dim=0)
-        states = torch.stack(state_list)
-        rewards = reward_list  # torch.cat(reward_list)
-        self.model.train()
-        for s in range(self.sgd_iterations):
-            L = self.clipped_surrogate(old_log_prob, states, rewards, epsilon=epsilon, beta=beta)
-            self.optimiser.zero_grad()
-            L.sum().backward(retain_graph=True if s != self.sgd_iterations - 1 else False)
-            # torch.nn.utils.clip_grad_norm_(self.model.parameters(), 5)  # clips the gradients for stability
-            self.optimiser.step()
-        self.model.eval()
+        states, actions, rewards, next_states, dones = zip(*experiences)
+        states = torch.stack(states)
+        actions = torch.stack(actions).squeeze()
+        rewards = torch.stack(rewards).unsqueeze(1)
+        next_states = torch.stack(next_states)
+        is_values = torch.from_numpy(is_values).to(self.device)
+        dones = torch.tensor(dones, dtype=torch.float, device=self.device).unsqueeze(1)
+        suggested_target_next_actions = self.target_actor(next_states)
+        suggested_actions = self.actor(states)
+        target_critic_next_input = torch.cat((next_states, suggested_target_next_actions), dim=1)
+        critic_input = torch.cat((states, actions), dim=1)
+        suggested_critic_input = torch.cat((states, suggested_actions), dim=1)
+        y = rewards + self.gamma * self.target_critic(target_critic_next_input) * (torch.ones_like(dones) - dones)  # sets 0 to the entries which are done
+        states_value = self.critic(critic_input)
+        suggested_actions_states_value = self.critic(suggested_critic_input)
 
-    def reset(self):
-        """Reset the memory of the agent"""
-        self.state_list = []
-        self.action_list = []
-        self.prob_list = []
-        self.reward_list = []
+        self.critic.train()
+        self.actor.train()
+        td_error = y.detach() - states_value
+        self.replay_buffer.update_priorities(indexes, abs(td_error))
+        loss_critic = 0.5 * (td_error).pow(2) * is_values.detach()
+        self.optimiser_critic.zero_grad()
+        loss_critic.mean().backward()
+        torch.nn.utils.clip_grad_norm(self.critic.parameters(), 1)
+        self.optimiser_critic.step()
+        loss_actor = suggested_actions * suggested_actions_states_value
+        self.optimiser_actor.zero_grad()
+        loss_actor.mean().backward()
+        self.optimiser_actor.step()
+        self.critic.eval()
+        self.actor.eval()
+        self.soft_update(self.critic, self.target_critic, self.tau)
+        self.soft_update(self.actor, self.target_actor, self.tau)
+
+    def soft_update(self, local_model, target_model, tau):
+        """Soft update model parameters.
+        θ_target = τ*θ_local + (1 - τ)*θ_target
+
+        Params
+        ======
+            local_model (PyTorch model): weights will be copied from
+            target_model (PyTorch model): weights will be copied to
+            tau (float): interpolation parameter
+        """
+        for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
+            target_param.data.copy_(tau * local_param.data + (1.0 - tau) * target_param.data)
 
     def train(self, env, writer, ending_condition):
         """
@@ -99,49 +139,46 @@ class AgentPPO(GenericAgent):
             env_info = env.reset(train_mode=True)[brain_name]  # reset the environment
             # Reset the memory of the agent
             state_list = []
+            next_state_list = []
             action_list = []
-            prob_list = []
             reward_list = []
+            done_list = []
             state = torch.tensor(env_info.vector_observations[0], dtype=torch.float, device=self.device)  # get the current state
             score = 0
-            self.model.eval()
+            self.actor.eval()
+            self.critic.eval()
             for t in range(self.max_t):
-                action, log_prob, entropy = self.model(state.unsqueeze(dim=0))
-                env_info = env.step(action.cpu().numpy())[brain_name]  # send the action to the environment
+                action: torch.Tensor = self.actor(state.unsqueeze(dim=0))
+                env_info = env.step(action.cpu().detach().numpy())[brain_name]  # send the action to the environment
                 next_state = torch.tensor(env_info.vector_observations[0], dtype=torch.float, device=self.device)  # get the next state
                 reward = env_info.rewards[0]  # get the reward
                 done = env_info.local_done[0]  # see if episode has finished
                 state_list.append(state)
                 action_list.append(action)
-                prob_list.append(log_prob)
                 reward_list.append(reward)
+                done_list.append(1 if done else 0)
+                next_state_list.append(next_state)
                 state = next_state
                 score += reward
                 if done:
                     break
             # prepares the rewards
-            rewards = reward_list.copy()
-            rewards.reverse()
-            previous_rewards = 0
-            for i in range(len(rewards)):
-                rewards[i] = rewards[i] + self.discount * previous_rewards
-                previous_rewards = rewards[i]
-            rewards.reverse()
-            rewards_array = np.asanyarray(rewards)
-            mns = rewards_array.mean()
-            sstd = rewards_array.std() + 1e-6
-            rewards_standardised = (rewards_array - mns) / sstd
-            rewards_standardised = np.nan_to_num(rewards_standardised, False)
-            assert not np.isnan(rewards_standardised).any()
-            rewards_standardised = torch.tensor(rewards_standardised, dtype=torch.float, device=self.device)
-            reward_list = rewards_standardised
-            self.learn(state_list, prob_list, reward_list, epsilon=epsilon, beta=beta)
-            # the clipping parameter reduces as time goes on
-            epsilon *= .999
+            rewards_array = self.calculate_discounted_rewards(reward_list)
+            # todo implement GAE
+            td_errors = self.calculate_td_errors(state_list, action_list, reward_list, next_state_list)
+            # stores the episode en the replay buffer
+            for i in range(len(action_list)):
+                state = state_list[i]
+                next_state = next_state_list[i]
+                action = action_list[i]
+                reward = torch.tensor(reward_list[i], device=self.device)
+                done = done_list[i]
+                self.replay_buffer.push((state, action, reward, next_state, done), abs(td_errors[i].item()))
 
-            # the regulation term also reduces
-            # this reduces exploration in later runs
-            beta *= .995
+            # train the agent
+            if len(self.replay_buffer) > self.batch_size and i_episode % self.train_every == 0:
+                experiences, indexes, is_values = self.replay_buffer.sample(self.batch_size)
+                self.learn(experiences=experiences, indexes=indexes, is_values=is_values)
             scores_window.append(score)  # save most recent score
             scores.append(score)  # save most recent score
             writer.add_scalar('data/score', score, i_episode)
@@ -157,6 +194,28 @@ class AgentPPO(GenericAgent):
                 # torch.save(agent.qnetwork_local.state_dict(), 'checkpoint.pth') #save the agent
                 break
         return scores
+
+    def calculate_td_errors(self, state_list, action_list, reward_list, next_state_list):
+        stacked_next_states = torch.stack(next_state_list, dim=0).to(self.device)
+        stacked_states = torch.stack(state_list, dim=0).to(self.device)
+        stacked_actions = torch.stack(action_list, dim=0).squeeze().to(self.device)
+        concat_states = torch.cat([stacked_states, stacked_actions], dim=1).to(self.device)
+        rewards = torch.tensor(reward_list).unsqueeze(dim=1).to(self.device)
+        suggested_next_action = self.target_actor(stacked_next_states).to(self.device)
+        concat_next_states = torch.cat([stacked_next_states, suggested_next_action], dim=1).to(self.device)
+        td_errors = rewards + self.target_critic(concat_next_states) - self.critic(concat_states)
+        return td_errors  # calculate the td-errors, maybe use GAE
+
+    def calculate_discounted_rewards(self, reward_list: list) -> np.ndarray:
+        rewards = reward_list.copy()
+        rewards.reverse()
+        previous_rewards = 0
+        for i in range(len(rewards)):
+            rewards[i] = rewards[i] + self.gamma * previous_rewards
+            previous_rewards = rewards[i]
+        rewards.reverse()
+        rewards_array = np.asanyarray(rewards)
+        return rewards_array
 
     def clipped_surrogate(self, old_log_probs, states, rewards_standardised, discount=0.995, epsilon=0.1, beta=0.01):
         # convert states to policy (or probability)
