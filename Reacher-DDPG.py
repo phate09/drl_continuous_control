@@ -47,18 +47,19 @@ def main():
         constants.optimiser_critic: optimizer_critic,
         constants.model_actor: actor,
         constants.model_critic: critic,
-        constants.n_episodes: 2000,
+        constants.n_episodes: 500,
+        constants.batch_size: 256,
+        constants.buffer_size: int(1e6),
         constants.max_t: 2000,  # just > 1000
         constants.epsilon: 0.2,
         constants.beta: 0.01,
         constants.input_dim: state_size,
         constants.output_dim: action_size,
-        constants.gamma: 0.99,
-        constants.tau: 0.001,
+        constants.gamma: 0.99, #discount
+        constants.tau: 0.001, #soft merge
         constants.device: device,
-        constants.train_every: 20,
-        constants.train_n_times: 10,
-        constants.sgd_iterations: 6,
+        constants.train_every: 4,
+        constants.train_n_times: 1,
         constants.ending_condition: ending_condition,
         constants.log_dir: log_dir
     }

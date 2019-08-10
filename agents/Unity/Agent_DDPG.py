@@ -28,7 +28,6 @@ class AgentDDPG(GenericAgent):
         self.input_dim: int = config[constants.input_dim]
         self.output_dim: int = config[constants.output_dim]
         self.max_t: int = config[constants.max_t]
-        self.sgd_iterations: int = config[constants.sgd_iterations]
         self.n_episodes: int = config[constants.n_episodes]
         self.gamma: float = config[constants.gamma]
         self.epsilon: float = config[constants.epsilon]
@@ -42,13 +41,13 @@ class AgentDDPG(GenericAgent):
         self.optimiser_actor: torch.optim.optimizer.Optimizer = config[constants.optimiser_actor]
         self.optimiser_critic: torch.optim.optimizer.Optimizer = config[constants.optimiser_critic]
         self.ending_condition = config[constants.ending_condition]
-        self.batch_size = 1024
+        self.batch_size = config[constants.batch_size]
         self.n_games = 1
         self.beta_start = 0.4
         self.beta_end = 1
         self.train_every = config[constants.train_every]
         self.train_n_times = config[constants.train_n_times]
-        self.replay_buffer = PrioReplayBuffer(int(1e5))
+        self.replay_buffer = PrioReplayBuffer(config[constants.buffer_size], alpha=0.6)
 
     # self.t_update_target_step = 0
     def required_properties(self):
@@ -136,6 +135,7 @@ class AgentDDPG(GenericAgent):
         brain_name = env.brain_names[0]
         scores = []  # list containing scores from each episode
         scores_window = deque(maxlen=100)  # last 100 scores
+        i_steps = 0
         for i_episode in range(self.n_episodes):
             env_info = env.reset(train_mode=True)[brain_name]  # reset the environment
             # Reset the memory of the agent
@@ -161,29 +161,32 @@ class AgentDDPG(GenericAgent):
                 reward_list.append(reward)
                 done_list.append(1 if done else 0)
                 next_state_list.append(next_state)
+                td_error = self.calculate_td_errors([state], [action], [reward], [next_state])
+                self.replay_buffer.push((state, action, torch.tensor(reward, device=self.device), next_state, done), abs(td_error[0].item()))
+                # train the agent
+                if len(self.replay_buffer) > self.batch_size and i_steps != 0 and i_steps % self.train_every == 0:
+                    beta = (self.beta_end - self.beta_start) * i_episode / self.n_episodes + self.beta_start
+                    for i in range(self.train_n_times):
+                        experiences, indexes, is_values = self.replay_buffer.sample(self.batch_size, beta=beta)
+                        self.learn(experiences=experiences, indexes=indexes, is_values=is_values)
                 state = next_state
                 score += reward
+                i_steps += 1
                 if done:
                     break
             # prepares the rewards
-            rewards_array = self.calculate_discounted_rewards(reward_list)
+            # rewards_array = self.calculate_discounted_rewards(reward_list)
             # todo implement GAE
-            td_errors = self.calculate_td_errors(state_list, action_list, reward_list, next_state_list)
-            # stores the episode en the replay buffer
-            for i in range(len(action_list)):
-                state = state_list[i]
-                next_state = next_state_list[i]
-                action = action_list[i]
-                reward = torch.tensor(reward_list[i], device=self.device)
-                done = done_list[i]
-                self.replay_buffer.push((state, action, reward, next_state, done), abs(td_errors[i].item()))
+            # td_errors = self.calculate_td_errors(state_list, action_list, reward_list, next_state_list)
+            # # stores the episode en the replay buffer
+            # for i in range(len(action_list)):
+            #     state = state_list[i]
+            #     next_state = next_state_list[i]
+            #     action = action_list[i]
+            #     reward = torch.tensor(reward_list[i], device=self.device)
+            #     done = done_list[i]
+            #     self.replay_buffer.push((state, action, reward, next_state, done), abs(td_errors[i].item()))
 
-            # train the agent
-            if len(self.replay_buffer) > self.batch_size and i_episode != 0 and i_episode % self.train_every == 0:
-                beta = (self.beta_end - self.beta_start) * i_episode / self.n_episodes + self.beta_start
-                for i in range(self.train_n_times):
-                    experiences, indexes, is_values = self.replay_buffer.sample(self.batch_size, beta=beta)
-                    self.learn(experiences=experiences, indexes=indexes, is_values=is_values)
             scores_window.append(score)  # save most recent score
             scores.append(score)  # save most recent score
             writer.add_scalar('data/score', score, i_episode)
@@ -202,9 +205,11 @@ class AgentDDPG(GenericAgent):
         return scores
 
     def calculate_td_errors(self, state_list, action_list, reward_list, next_state_list):
+        self.target_actor.eval()
+        self.target_critic.eval()
         stacked_next_states = torch.stack(next_state_list, dim=0).to(self.device)
         stacked_states = torch.stack(state_list, dim=0).to(self.device)
-        stacked_actions = torch.stack(action_list, dim=0).squeeze().to(self.device)
+        stacked_actions = torch.stack(action_list, dim=0).squeeze(dim=1).to(self.device)
         concat_states = torch.cat([stacked_states, stacked_actions], dim=1).to(self.device)
         rewards = torch.tensor(reward_list).unsqueeze(dim=1).to(self.device)
         suggested_next_action = self.target_actor(stacked_next_states).to(self.device)
