@@ -1,3 +1,4 @@
+import os
 import pickle
 from collections import deque
 
@@ -30,8 +31,6 @@ class AgentDDPG(GenericAgent):
         self.max_t: int = config[constants.max_t]
         self.n_episodes: int = config[constants.n_episodes]
         self.gamma: float = config[constants.gamma]
-        self.epsilon: float = config[constants.epsilon]
-        self.beta: float = config[constants.beta]
         self.tau: float = config[constants.tau]
         self.device = config[constants.device]
         self.actor: torch.nn.Module = config[constants.model_actor]
@@ -48,6 +47,8 @@ class AgentDDPG(GenericAgent):
         self.train_every = config[constants.train_every]
         self.train_n_times = config[constants.train_n_times]
         self.replay_buffer = PrioReplayBuffer(config[constants.buffer_size], alpha=0.6)
+        self.log_dir = config[constants.log_dir]
+        self.config = config
 
     # self.t_update_target_step = 0
     def required_properties(self):
@@ -124,11 +125,8 @@ class AgentDDPG(GenericAgent):
         """
 
         :param env:
-        :param brain_name:
         :param writer:
         :param ending_condition: a method that given a score window returns true or false
-        :param n_episodes:
-        :param max_t:
         :return:
         """
         brain_name = env.brain_names[0]
@@ -149,8 +147,6 @@ class AgentDDPG(GenericAgent):
             self.critic.eval()
             for t in range(self.max_t):
                 actions: torch.Tensor = self.actor(states)
-                noise_upper = 1
-                noise_lower = -1
                 with torch.no_grad():
                     noise = torch.normal(torch.zeros_like(actions), torch.ones_like(actions) * 0.2)
                 # noise = ((noise_upper - noise_lower) * torch.rand_like(actions) + noise_lower)  # adds exploratory noise
@@ -200,7 +196,9 @@ class AgentDDPG(GenericAgent):
                 f'\rEpisode {i_episode + 1}\tAverage Score: {np.mean(scores_window):.2f} ', end="")
             if i_episode + 1 % 100 == 0:
                 print(f'\rEpisode {i_episode + 1}\tAverage Score: {np.mean(scores_window):.2f} ')
-            # torch.save(self.model, os.path.join(log_dir, "checkpoint.pth"))
+            if i_episode + 1 % 10 == 0:
+                torch.save(self.actor, os.path.join(self.log_dir, f"checkpoint_actor_{i_episode}.pth"))
+                torch.save(self.critic, os.path.join(self.log_dir, f"checkpoint_critic_{i_episode}.pth"))
             result = {"mean": np.mean(scores_window)}
             if ending_condition(result):
                 print(f'\nEnvironment solved in {i_episode - 100:d} episodes!\tAverage Score: {np.mean(scores_window):.2f}')
