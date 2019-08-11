@@ -56,7 +56,6 @@ class AgentDDPG(GenericAgent):
                 constants.max_t,
                 constants.n_episodes,
                 constants.gamma,
-                constants.beta,
                 constants.tau,
                 constants.device,
                 constants.model_actor,
@@ -75,11 +74,11 @@ class AgentDDPG(GenericAgent):
         """
         states, actions, rewards, next_states, dones = zip(*experiences)
         states = torch.stack(states)
-        actions = torch.stack(actions).squeeze()
-        rewards = torch.stack(rewards).unsqueeze(1)
+        actions = torch.stack(actions)
+        rewards = torch.stack(rewards)
         next_states = torch.stack(next_states)
         is_values = torch.from_numpy(is_values).to(self.device)
-        dones = torch.tensor(dones, dtype=torch.float, device=self.device).unsqueeze(1)
+        dones = torch.stack(dones).float()
         target_mu_sprime = self.target_actor(next_states)
         mu_s = self.actor(states)
         target_sprime_target_mu_sprime = torch.cat((next_states, target_mu_sprime), dim=1)
@@ -144,35 +143,40 @@ class AgentDDPG(GenericAgent):
             action_list = []
             reward_list = []
             done_list = []
-            state = torch.tensor(env_info.vector_observations[0], dtype=torch.float, device=self.device)  # get the current state
+            states = torch.tensor(env_info.vector_observations, dtype=torch.float, device=self.device)  # get the current state
             score = 0
             self.actor.eval()
             self.critic.eval()
             for t in range(self.max_t):
-                action: torch.Tensor = self.actor(state.unsqueeze(dim=0))
-                noise = ((1 + 1) * torch.rand_like(action) - 1)  # adds exploratory noise
-                action = torch.clamp(action + noise, -1, 1)  # clips the action to the allowed boundaries
-                env_info = env.step(action.cpu().detach().numpy())[brain_name]  # send the action to the environment
-                next_state = torch.tensor(env_info.vector_observations[0], dtype=torch.float, device=self.device)  # get the next state
-                reward = env_info.rewards[0]  # get the reward
-                done = env_info.local_done[0]  # see if episode has finished
-                state_list.append(state)
-                action_list.append(action)
-                reward_list.append(reward)
-                done_list.append(1 if done else 0)
-                next_state_list.append(next_state)
-                td_error = self.calculate_td_errors([state], [action], [reward], [next_state])
-                self.replay_buffer.push((state, action, torch.tensor(reward, device=self.device), next_state, done), abs(td_error[0].item()))
+                actions: torch.Tensor = self.actor(states)
+                noise_upper = 1
+                noise_lower = -1
+                with torch.no_grad():
+                    noise = torch.normal(torch.zeros_like(actions), torch.ones_like(actions) * 0.2)
+                # noise = ((noise_upper - noise_lower) * torch.rand_like(actions) + noise_lower)  # adds exploratory noise
+                actions = torch.clamp(actions + noise, -1, 1)  # clips the action to the allowed boundaries
+                env_info = env.step(actions.cpu().detach().numpy())[brain_name]  # send the action to the environment
+                next_states = torch.tensor(env_info.vector_observations, dtype=torch.float, device=self.device)  # get the next state
+                rewards = torch.tensor(env_info.rewards, device=self.device).unsqueeze(dim=1)  # get the reward
+                dones = torch.tensor(env_info.local_done, dtype=torch.uint8, device=self.device).unsqueeze(dim=1)  # see if episode has finished
+                state_list.append(states)
+                action_list.append(actions)
+                reward_list.append(rewards)
+                done_list.append(dones)
+                next_state_list.append(next_states)
+                td_error = self.calculate_td_errors(states, actions, rewards, next_states)
+                for i in range(states.size()[0]):
+                    self.replay_buffer.push((states[i], actions[i], rewards[i], next_states[i], dones[i]), abs(td_error[i].item()))
                 # train the agent
                 if len(self.replay_buffer) > self.batch_size and i_steps != 0 and i_steps % self.train_every == 0:
                     beta = (self.beta_end - self.beta_start) * i_episode / self.n_episodes + self.beta_start
                     for i in range(self.train_n_times):
                         experiences, indexes, is_values = self.replay_buffer.sample(self.batch_size, beta=beta)
                         self.learn(experiences=experiences, indexes=indexes, is_values=is_values)
-                state = next_state
-                score += reward
+                states = next_states
+                score += rewards.mean().item()
                 i_steps += 1
-                if done:
+                if dones.any():
                     break
             # prepares the rewards
             # rewards_array = self.calculate_discounted_rewards(reward_list)
@@ -204,16 +208,12 @@ class AgentDDPG(GenericAgent):
                 break
         return scores
 
-    def calculate_td_errors(self, state_list, action_list, reward_list, next_state_list):
+    def calculate_td_errors(self, states: torch.Tensor, actions: torch.Tensor, rewards: torch.Tensor, next_states: torch.Tensor) -> torch.Tensor:
         self.target_actor.eval()
         self.target_critic.eval()
-        stacked_next_states = torch.stack(next_state_list, dim=0).to(self.device)
-        stacked_states = torch.stack(state_list, dim=0).to(self.device)
-        stacked_actions = torch.stack(action_list, dim=0).squeeze(dim=1).to(self.device)
-        concat_states = torch.cat([stacked_states, stacked_actions], dim=1).to(self.device)
-        rewards = torch.tensor(reward_list).unsqueeze(dim=1).to(self.device)
-        suggested_next_action = self.target_actor(stacked_next_states).to(self.device)
-        concat_next_states = torch.cat([stacked_next_states, suggested_next_action], dim=1).to(self.device)
+        concat_states = torch.cat([states, actions], dim=1).to(self.device)
+        suggested_next_action = self.target_actor(next_states).to(self.device)
+        concat_next_states = torch.cat([next_states, suggested_next_action], dim=1).to(self.device)
         td_errors = rewards + self.gamma * self.target_critic(concat_next_states) - self.critic(concat_states)
         return td_errors  # calculate the td-errors, maybe use GAE
 
