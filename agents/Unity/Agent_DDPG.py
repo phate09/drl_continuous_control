@@ -1,6 +1,7 @@
 import os
 import pickle
 from collections import deque
+from functools import reduce
 
 import numpy as np
 import torch
@@ -48,6 +49,7 @@ class AgentDDPG(GenericAgent):
         self.train_n_times = config[constants.train_n_times]
         self.replay_buffer = PrioReplayBuffer(config[constants.buffer_size], alpha=0.6)
         self.log_dir = config[constants.log_dir]
+        self.n_step_td = 4
         self.config = config
 
     # self.t_update_target_step = 0
@@ -135,6 +137,7 @@ class AgentDDPG(GenericAgent):
         i_steps = 0
         for i_episode in range(self.n_episodes):
             env_info = env.reset(train_mode=True)[brain_name]  # reset the environment
+            n_agents = len(env_info.agents)
             # Reset the memory of the agent
             state_list = []
             next_state_list = []
@@ -160,9 +163,11 @@ class AgentDDPG(GenericAgent):
                 reward_list.append(rewards)
                 done_list.append(dones)
                 next_state_list.append(next_states)
-                td_error = self.calculate_td_errors(states, actions, rewards, next_states)
-                for i in range(states.size()[0]):
-                    self.replay_buffer.push((states[i], actions[i], rewards[i], next_states[i], dones[i]), abs(td_error[i].item()))
+                if len(state_list) >= self.n_step_td:
+                    rewards_n = reduce((lambda x1, x2: x2 + self.gamma * x1), reversed(reward_list[t - self.n_step_td+1:t+1]))
+                    td_error = self.calculate_td_errors(state_list[t - self.n_step_td+1], actions, rewards_n, next_state_list[t])
+                    for i in range(states.size()[0]):
+                        self.replay_buffer.push((state_list[t - self.n_step_td+1][i], actions[i], rewards_n[i], next_state_list[t][i], dones[i]), abs(td_error[i].item()))
                 # train the agent
                 if len(self.replay_buffer) > self.batch_size and i_steps != 0 and i_steps % self.train_every == 0:
                     beta = (self.beta_end - self.beta_start) * i_episode / self.n_episodes + self.beta_start
@@ -171,7 +176,7 @@ class AgentDDPG(GenericAgent):
                         self.learn(experiences=experiences, indexes=indexes, is_values=is_values)
                 states = next_states
                 score += rewards.mean().item()
-                i_steps += 1
+                i_steps += n_agents
                 if dones.any():
                     break
             # prepares the rewards
@@ -194,9 +199,9 @@ class AgentDDPG(GenericAgent):
             writer.flush()
             print(
                 f'\rEpisode {i_episode + 1}\tAverage Score: {np.mean(scores_window):.2f} ', end="")
-            if i_episode + 1 % 100 == 0:
+            if (i_episode + 1) % 100 == 0:
                 print(f'\rEpisode {i_episode + 1}\tAverage Score: {np.mean(scores_window):.2f} ')
-            if i_episode + 1 % 10 == 0:
+            if (i_episode + 1) % 10 == 0:
                 torch.save(self.actor, os.path.join(self.log_dir, f"checkpoint_actor_{i_episode}.pth"))
                 torch.save(self.critic, os.path.join(self.log_dir, f"checkpoint_critic_{i_episode}.pth"))
             result = {"mean": np.mean(scores_window)}
