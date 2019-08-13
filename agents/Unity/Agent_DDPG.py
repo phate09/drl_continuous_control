@@ -11,7 +11,8 @@ from tensorboardX import SummaryWriter
 
 import constants
 from agents.GenericAgent import GenericAgent
-from utility.PrioReplayBuffer import PrioReplayBuffer
+# from utility.PrioReplayBuffer import PrioReplayBuffer
+from utility.PrioritisedExperienceReplayBuffer import PrioritizedReplayBuffer
 
 
 class AgentDDPG(GenericAgent):
@@ -47,7 +48,7 @@ class AgentDDPG(GenericAgent):
         self.beta_end = 1
         self.train_every = config[constants.train_every]
         self.train_n_times = config[constants.train_n_times]
-        self.replay_buffer = PrioReplayBuffer(config[constants.buffer_size], alpha=0.6)
+        self.replay_buffer = PrioritizedReplayBuffer(config[constants.buffer_size], alpha=0.6)
         self.log_dir = config[constants.log_dir]
         self.n_step_td = config[constants.n_step_td]
         self.config = config
@@ -81,7 +82,7 @@ class AgentDDPG(GenericAgent):
         actions = torch.stack(actions)
         rewards = torch.stack(rewards)
         next_states = torch.stack(next_states)
-        is_values = torch.from_numpy(is_values).to(self.device)
+        is_values = torch.from_numpy(is_values).float().to(self.device)
         dones = torch.stack(dones).float()
         target_mu_sprime = self.target_actor(next_states)
         mu_s = self.actor(states)
@@ -95,15 +96,15 @@ class AgentDDPG(GenericAgent):
         self.critic.train()
         self.actor.train()
         td_error = y.detach() - Qs_a
-        self.replay_buffer.update_priorities(indexes, abs(td_error))
+        self.replay_buffer.update_priorities(indexes, abs(td_error).detach().cpu().numpy())
         loss_critic = td_error.pow(2) * is_values.detach()
         self.optimiser_critic.zero_grad()
-        loss_critic.mean().backward(retain_graph=True)
+        loss_critic.mean().backward(retain_graph=False)
         torch.nn.utils.clip_grad_norm_(self.critic.parameters(), 1)
         self.optimiser_critic.step()
         loss_actor = -Qs_mu_s  # gradient ascent # mu_s *
         self.optimiser_actor.zero_grad()
-        loss_actor.mean().backward(retain_graph=True)
+        loss_actor.mean().backward(retain_graph=False)
         torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 1)
         self.optimiser_actor.step()
         self.critic.eval()
@@ -150,30 +151,30 @@ class AgentDDPG(GenericAgent):
             self.actor.eval()
             self.critic.eval()
             for t in range(self.max_t):
-                actions: torch.Tensor = self.actor(states)
                 with torch.no_grad():
+                    actions: torch.Tensor = self.actor(states)
                     noise = torch.normal(torch.zeros_like(actions), torch.ones_like(actions) * 0.2)
-                # noise = ((noise_upper - noise_lower) * torch.rand_like(actions) + noise_lower)  # adds exploratory noise
-                actions = torch.clamp(actions + noise, -1, 1)  # clips the action to the allowed boundaries
-                env_info = env.step(actions.cpu().detach().numpy())[brain_name]  # send the action to the environment
-                next_states = torch.tensor(env_info.vector_observations, dtype=torch.float, device=self.device)  # get the next state
-                rewards = torch.tensor(env_info.rewards, dtype=torch.float, device=self.device).unsqueeze(dim=1)  # get the reward
-                dones = torch.tensor(env_info.local_done, dtype=torch.uint8, device=self.device).unsqueeze(dim=1)  # see if episode has finished
-                state_list.append(states)
-                action_list.append(actions)
-                reward_list.append(rewards)
-                done_list.append(dones)
-                next_state_list.append(next_states)
-                if len(state_list) >= self.n_step_td:
-                    rewards_n = reduce((lambda x1, x2: x2 + self.gamma * x1), reversed(reward_list[t - self.n_step_td + 1:t + 1]))
-                    td_error = self.calculate_td_errors(state_list[t - self.n_step_td + 1], actions, rewards_n, next_state_list[t])
-                    for i in range(states.size()[0]):
-                        self.replay_buffer.push((state_list[t - self.n_step_td + 1][i], actions[i], rewards_n[i], next_state_list[t][i], dones[i]), abs(td_error[i].item()))
+                    # noise = ((noise_upper - noise_lower) * torch.rand_like(actions) + noise_lower)  # adds exploratory noise
+                    actions = torch.clamp(actions + noise, -1, 1)  # clips the action to the allowed boundaries
+                    env_info = env.step(actions.cpu().detach().numpy())[brain_name]  # send the action to the environment
+                    next_states = torch.tensor(env_info.vector_observations, dtype=torch.float, device=self.device)  # get the next state
+                    rewards = torch.tensor(env_info.rewards, dtype=torch.float, device=self.device).unsqueeze(dim=1)  # get the reward
+                    dones = torch.tensor(env_info.local_done, dtype=torch.uint8, device=self.device).unsqueeze(dim=1)  # see if episode has finished
+                    state_list.append(states)
+                    action_list.append(actions)
+                    reward_list.append(rewards)
+                    done_list.append(dones)
+                    next_state_list.append(next_states)
+                    if len(state_list) >= self.n_step_td:
+                        rewards_n = reduce((lambda x1, x2: x2 + self.gamma * x1), reversed(reward_list[t - self.n_step_td + 1:t + 1]))
+                        td_error = self.calculate_td_errors(state_list[t - self.n_step_td + 1], actions, rewards_n, next_state_list[t])
+                        for i in range(states.size()[0]):
+                            self.replay_buffer.add((state_list[t - self.n_step_td + 1][i], actions[i], rewards_n[i], next_state_list[t][i], dones[i]), abs(td_error[i].item()))
                 # train the agent
                 if len(self.replay_buffer) > self.batch_size and i_steps != 0 and i_steps % self.train_every == 0:
                     beta = (self.beta_end - self.beta_start) * i_episode / self.n_episodes + self.beta_start
                     for i in range(self.train_n_times):
-                        experiences, indexes, is_values = self.replay_buffer.sample(self.batch_size, beta=beta)
+                        experiences, is_values, indexes = self.replay_buffer.sample(self.batch_size, beta=beta)
                         self.learn(experiences=experiences, indexes=indexes, is_values=is_values)
                 states = next_states
                 score += rewards.mean().item()
@@ -208,7 +209,7 @@ class AgentDDPG(GenericAgent):
         concat_states = torch.cat([states, actions], dim=1)
         suggested_next_action = self.target_actor(next_states)
         concat_next_states = torch.cat([next_states, suggested_next_action], dim=1)
-        td_errors = rewards + self.gamma * self.target_critic(concat_next_states) - self.critic(concat_states)
+        td_errors = rewards + np.power(self.gamma, self.n_step_td) * self.target_critic(concat_next_states) - self.critic(concat_states)
         return td_errors  # calculate the td-errors, maybe use GAE
 
     def calculate_discounted_rewards(self, reward_list: list) -> np.ndarray:
@@ -225,12 +226,12 @@ class AgentDDPG(GenericAgent):
     def save(self, path, episode):
         torch.save({
             "episode": episode,
-            "actor": self.actor,
-            "target_actor": self.target_actor,
-            "critic": self.critic,
-            "target_critic": self.target_critic,
-            "optimiser_actor": self.optimiser_actor,
-            "optimiser_critic": self.optimiser_critic,
+            "actor": self.actor.state_dict(),
+            "target_actor": self.target_actor.state_dict(),
+            "critic": self.critic.state_dict(),
+            "target_critic": self.target_critic.state_dict(),
+            "optimiser_actor": self.optimiser_actor.state_dict(),
+            "optimiser_critic": self.optimiser_critic.state_dict(),
             "replay_buffer": self.replay_buffer
         }, path)
 
