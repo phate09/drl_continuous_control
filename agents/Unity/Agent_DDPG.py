@@ -12,6 +12,7 @@ from tensorboardX import SummaryWriter
 import constants
 from agents.GenericAgent import GenericAgent
 from utility.PrioReplayBuffer import PrioReplayBuffer
+from apex import amp, optimizers
 
 
 class AgentDDPG(GenericAgent):
@@ -49,7 +50,7 @@ class AgentDDPG(GenericAgent):
         self.train_n_times = config[constants.train_n_times]
         self.replay_buffer = PrioReplayBuffer(config[constants.buffer_size], alpha=0.6)
         self.log_dir = config[constants.log_dir]
-        self.n_step_td = 4
+        self.n_step_td = 1
         self.config = config
 
     # self.t_update_target_step = 0
@@ -156,7 +157,7 @@ class AgentDDPG(GenericAgent):
                 actions = torch.clamp(actions + noise, -1, 1)  # clips the action to the allowed boundaries
                 env_info = env.step(actions.cpu().detach().numpy())[brain_name]  # send the action to the environment
                 next_states = torch.tensor(env_info.vector_observations, dtype=torch.float, device=self.device)  # get the next state
-                rewards = torch.tensor(env_info.rewards, device=self.device).unsqueeze(dim=1)  # get the reward
+                rewards = torch.tensor(env_info.rewards,dtype=torch.float, device=self.device).unsqueeze(dim=1)  # get the reward
                 dones = torch.tensor(env_info.local_done, dtype=torch.uint8, device=self.device).unsqueeze(dim=1)  # see if episode has finished
                 state_list.append(states)
                 action_list.append(actions)
@@ -214,9 +215,9 @@ class AgentDDPG(GenericAgent):
     def calculate_td_errors(self, states: torch.Tensor, actions: torch.Tensor, rewards: torch.Tensor, next_states: torch.Tensor) -> torch.Tensor:
         self.target_actor.eval()
         self.target_critic.eval()
-        concat_states = torch.cat([states, actions], dim=1).to(self.device)
-        suggested_next_action = self.target_actor(next_states).to(self.device)
-        concat_next_states = torch.cat([next_states, suggested_next_action], dim=1).to(self.device)
+        concat_states = torch.cat([states, actions], dim=1)
+        suggested_next_action = self.target_actor(next_states)
+        concat_next_states = torch.cat([next_states, suggested_next_action], dim=1)
         td_errors = rewards + self.gamma * self.target_critic(concat_next_states) - self.critic(concat_states)
         return td_errors  # calculate the td-errors, maybe use GAE
 

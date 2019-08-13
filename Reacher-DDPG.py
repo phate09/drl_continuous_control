@@ -14,7 +14,7 @@ from agents.Unity.Agent_DDPG import AgentDDPG
 from networks.actor_critic.Policy_actor import Policy_actor
 # from environment.Reacher_wrapper import Reacher_wrapper
 from networks.actor_critic.Policy_critic import Policy_critic
-
+from apex import amp, optimizers
 
 def main():
     now = datetime.now()
@@ -25,14 +25,14 @@ def main():
     seed = 2
     torch.manual_seed(seed)
     np.random.seed(seed)
-    env = UnityEnvironment("./environment/Reacher_Linux_NoVis/Reacher.x86_64", worker_id=1, seed=seed, no_graphics=True)
+    env = UnityEnvironment("./environment/Reacher_Linux_multi/Reacher.x86_64", worker_id=1, seed=seed, no_graphics=True)
     brain = env.brains[env.brain_names[0]]
     env_info = env.reset(train_mode=True)[env.brain_names[0]]
     print('Number of agents:', len(env_info.agents))
     action_size = brain.vector_action_space_size
     state_size = brain.vector_observation_space_size
     action_type = brain.vector_action_space_type
-    comment = f"DDPG Unity Reacher"
+    comment = f"DDPG Unity Reacher multi"
     actor = Policy_actor(state_size, action_size).to(device)
     critic = Policy_critic(state_size + action_size).to(device)
     # actor.test(device)
@@ -40,6 +40,8 @@ def main():
     optimizer_critic = optim.Adam(critic.parameters(), lr=1e-4)
     # optimizer = optim.RMSprop(actor.parameters(),lr=1e-4)
     ending_condition = lambda result: result['mean'] >= 30.0
+    # actor, optimizer_actor = amp.initialize(actor, optimizer_actor,opt_level="O1")
+    # critic, optimizer_critic = amp.initialize(critic, optimizer_critic,opt_level="O1")
     log_dir = os.path.join('runs', current_time + '_' + comment)
     os.mkdir(log_dir)
     config = {
@@ -56,8 +58,8 @@ def main():
         constants.gamma: 0.99,  # discount
         constants.tau: 0.001,  # soft merge
         constants.device: device,
-        constants.train_every: 4,
-        constants.train_n_times: 1,
+        constants.train_every: 120,
+        constants.train_n_times: 2,
         constants.ending_condition: ending_condition,
         constants.log_dir: log_dir
     }
