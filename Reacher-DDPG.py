@@ -12,9 +12,8 @@ from unityagents import UnityEnvironment
 import constants
 from agents.Unity.Agent_DDPG import AgentDDPG
 from networks.actor_critic.Policy_actor import Policy_actor
-# from environment.Reacher_wrapper import Reacher_wrapper
 from networks.actor_critic.Policy_critic import Policy_critic
-from apex import amp, optimizers
+
 
 def main():
     now = datetime.now()
@@ -25,7 +24,9 @@ def main():
     seed = 2
     torch.manual_seed(seed)
     np.random.seed(seed)
-    env = UnityEnvironment("./environment/Reacher_Linux_multi/Reacher.x86_64", worker_id=1, seed=seed, no_graphics=True)
+    worker_id = 2
+    print(f'Worker_id={worker_id}')
+    env = UnityEnvironment("./environment/Reacher_Linux_multi/Reacher.x86_64", worker_id=worker_id, seed=seed, no_graphics=True)
     brain = env.brains[env.brain_names[0]]
     env_info = env.reset(train_mode=True)[env.brain_names[0]]
     print('Number of agents:', len(env_info.agents))
@@ -35,13 +36,13 @@ def main():
     comment = f"DDPG Unity Reacher multi"
     actor = Policy_actor(state_size, action_size).to(device)
     critic = Policy_critic(state_size + action_size).to(device)
+    # actor = torch.load("/home/edoardo/PycharmProjects/ProximalPolicyOptimisation/runs/Aug12_23-04-26_DDPG Unity Reacher multi/checkpoint_actor_359.pth")
+    # critic = torch.load("/home/edoardo/PycharmProjects/ProximalPolicyOptimisation/runs/Aug12_23-04-26_DDPG Unity Reacher multi/checkpoint_critic_359.pth")
     # actor.test(device)
     optimizer_actor = optim.Adam(actor.parameters(), lr=1e-4)
     optimizer_critic = optim.Adam(critic.parameters(), lr=1e-4)
     # optimizer = optim.RMSprop(actor.parameters(),lr=1e-4)
-    ending_condition = lambda result: result['mean'] >= 30.0
-    # actor, optimizer_actor = amp.initialize(actor, optimizer_actor,opt_level="O1")
-    # critic, optimizer_critic = amp.initialize(critic, optimizer_critic,opt_level="O1")
+    ending_condition = lambda result: result['mean'] >= 300.0
     log_dir = os.path.join('runs', current_time + '_' + comment)
     os.mkdir(log_dir)
     config = {
@@ -50,7 +51,7 @@ def main():
         constants.model_actor: actor,
         constants.model_critic: critic,
         constants.n_episodes: 2000,
-        constants.batch_size: 256,
+        constants.batch_size: 64,
         constants.buffer_size: int(1e6),
         constants.max_t: 2000,  # just > 1000
         constants.input_dim: state_size,
@@ -59,7 +60,8 @@ def main():
         constants.tau: 0.001,  # soft merge
         constants.device: device,
         constants.train_every: 120,
-        constants.train_n_times: 2,
+        constants.train_n_times: 4,
+        constants.n_step_td: 2,
         constants.ending_condition: ending_condition,
         constants.log_dir: log_dir
     }

@@ -12,7 +12,6 @@ from tensorboardX import SummaryWriter
 import constants
 from agents.GenericAgent import GenericAgent
 from utility.PrioReplayBuffer import PrioReplayBuffer
-from apex import amp, optimizers
 
 
 class AgentDDPG(GenericAgent):
@@ -50,8 +49,9 @@ class AgentDDPG(GenericAgent):
         self.train_n_times = config[constants.train_n_times]
         self.replay_buffer = PrioReplayBuffer(config[constants.buffer_size], alpha=0.6)
         self.log_dir = config[constants.log_dir]
-        self.n_step_td = 1
+        self.n_step_td = config[constants.n_step_td]
         self.config = config
+        self.starting_episode = 0  # used for loading checkpoints
 
     # self.t_update_target_step = 0
     def required_properties(self):
@@ -136,7 +136,7 @@ class AgentDDPG(GenericAgent):
         scores = []  # list containing scores from each episode
         scores_window = deque(maxlen=100)  # last 100 scores
         i_steps = 0
-        for i_episode in range(self.n_episodes):
+        for i_episode in range(self.starting_episode, self.n_episodes):
             env_info = env.reset(train_mode=True)[brain_name]  # reset the environment
             n_agents = len(env_info.agents)
             # Reset the memory of the agent
@@ -157,7 +157,7 @@ class AgentDDPG(GenericAgent):
                 actions = torch.clamp(actions + noise, -1, 1)  # clips the action to the allowed boundaries
                 env_info = env.step(actions.cpu().detach().numpy())[brain_name]  # send the action to the environment
                 next_states = torch.tensor(env_info.vector_observations, dtype=torch.float, device=self.device)  # get the next state
-                rewards = torch.tensor(env_info.rewards,dtype=torch.float, device=self.device).unsqueeze(dim=1)  # get the reward
+                rewards = torch.tensor(env_info.rewards, dtype=torch.float, device=self.device).unsqueeze(dim=1)  # get the reward
                 dones = torch.tensor(env_info.local_done, dtype=torch.uint8, device=self.device).unsqueeze(dim=1)  # see if episode has finished
                 state_list.append(states)
                 action_list.append(actions)
@@ -165,10 +165,10 @@ class AgentDDPG(GenericAgent):
                 done_list.append(dones)
                 next_state_list.append(next_states)
                 if len(state_list) >= self.n_step_td:
-                    rewards_n = reduce((lambda x1, x2: x2 + self.gamma * x1), reversed(reward_list[t - self.n_step_td+1:t+1]))
-                    td_error = self.calculate_td_errors(state_list[t - self.n_step_td+1], actions, rewards_n, next_state_list[t])
+                    rewards_n = reduce((lambda x1, x2: x2 + self.gamma * x1), reversed(reward_list[t - self.n_step_td + 1:t + 1]))
+                    td_error = self.calculate_td_errors(state_list[t - self.n_step_td + 1], actions, rewards_n, next_state_list[t])
                     for i in range(states.size()[0]):
-                        self.replay_buffer.push((state_list[t - self.n_step_td+1][i], actions[i], rewards_n[i], next_state_list[t][i], dones[i]), abs(td_error[i].item()))
+                        self.replay_buffer.push((state_list[t - self.n_step_td + 1][i], actions[i], rewards_n[i], next_state_list[t][i], dones[i]), abs(td_error[i].item()))
                 # train the agent
                 if len(self.replay_buffer) > self.batch_size and i_steps != 0 and i_steps % self.train_every == 0:
                     beta = (self.beta_end - self.beta_start) * i_episode / self.n_episodes + self.beta_start
@@ -180,35 +180,25 @@ class AgentDDPG(GenericAgent):
                 i_steps += n_agents
                 if dones.any():
                     break
-            # prepares the rewards
-            # rewards_array = self.calculate_discounted_rewards(reward_list)
             # todo implement GAE
-            # td_errors = self.calculate_td_errors(state_list, action_list, reward_list, next_state_list)
-            # # stores the episode en the replay buffer
-            # for i in range(len(action_list)):
-            #     state = state_list[i]
-            #     next_state = next_state_list[i]
-            #     action = action_list[i]
-            #     reward = torch.tensor(reward_list[i], device=self.device)
-            #     done = done_list[i]
-            #     self.replay_buffer.push((state, action, reward, next_state, done), abs(td_errors[i].item()))
-
             scores_window.append(score)  # save most recent score
             scores.append(score)  # save most recent score
             writer.add_scalar('data/score', score, i_episode)
             writer.add_scalar('data/score_average', np.mean(scores_window), i_episode)
             writer.flush()
-            print(
-                f'\rEpisode {i_episode + 1}\tAverage Score: {np.mean(scores_window):.2f} ', end="")
+            print(f'\rEpisode {i_episode + 1}\tAverage Score: {np.mean(scores_window):.2f} ', end="")
             if (i_episode + 1) % 100 == 0:
                 print(f'\rEpisode {i_episode + 1}\tAverage Score: {np.mean(scores_window):.2f} ')
             if (i_episode + 1) % 10 == 0:
-                torch.save(self.actor, os.path.join(self.log_dir, f"checkpoint_actor_{i_episode}.pth"))
-                torch.save(self.critic, os.path.join(self.log_dir, f"checkpoint_critic_{i_episode}.pth"))
+                # torch.save(self.actor, os.path.join(self.log_dir, f"checkpoint_actor_{i_episode + 1}.pth"))
+                # torch.save(self.critic, os.path.join(self.log_dir, f"checkpoint_critic_{i_episode + 1}.pth"))
+                self.save(os.path.join(self.log_dir, f"checkpoint_{i_episode + 1}.pth"), i_episode)
             result = {"mean": np.mean(scores_window)}
             if ending_condition(result):
                 print(f'\nEnvironment solved in {i_episode - 100:d} episodes!\tAverage Score: {np.mean(scores_window):.2f}')
-                # torch.save(agent.qnetwork_local.state_dict(), 'checkpoint.pth') #save the agent
+                # torch.save(self.actor, os.path.join(self.log_dir, f"checkpoint_actor_success.pth"))
+                # torch.save(self.critic, os.path.join(self.log_dir, f"checkpoint_critic_success.pth"))
+                self.save(os.path.join(self.log_dir, f"checkpoint_success.pth"), i_episode)
                 break
         return scores
 
@@ -231,3 +221,26 @@ class AgentDDPG(GenericAgent):
         rewards.reverse()
         rewards_array = np.asanyarray(rewards)
         return rewards_array
+
+    def save(self, path, episode):
+        torch.save({
+            "episode": episode,
+            "actor": self.actor,
+            "target_actor": self.target_actor,
+            "critic": self.critic,
+            "target_critic": self.target_critic,
+            "optimiser_actor": self.optimiser_actor,
+            "optimiser_critic": self.optimiser_critic,
+            "replay_buffer": self.replay_buffer
+        }, path)
+
+    def load(self, path):
+        checkpoint = torch.load(path)
+        self.actor.load_state_dict(checkpoint["actor"])
+        self.target_actor.load_state_dict(checkpoint["target_actor"])
+        self.critic.load_state_dict(checkpoint["critic"])
+        self.target_critic.load_state_dict(checkpoint["target_critic"])
+        self.optimiser_actor.load_state_dict(checkpoint["optimiser_actor"])
+        self.optimiser_critic.load_state_dict(checkpoint["optimiser_criti"])
+        self.replay_buffer = checkpoint["optimiser_criti"]
+        self.starting_episode = checkpoint["episode"]
