@@ -24,7 +24,7 @@ def main():
     seed = 2
     torch.manual_seed(seed)
     np.random.seed(seed)
-    worker_id = 2
+    worker_id = 3
     print(f'Worker_id={worker_id}')
     env = UnityEnvironment("./environment/Reacher_Linux_multi/Reacher.x86_64", worker_id=worker_id, seed=seed, no_graphics=True)
     brain = env.brains[env.brain_names[0]]
@@ -45,6 +45,7 @@ def main():
     ending_condition = lambda result: result['mean'] >= 300.0
     log_dir = os.path.join('runs', current_time + '_' + comment)
     os.mkdir(log_dir)
+    print(f"logging to {log_dir}")
     config = {
         constants.optimiser_actor: optimizer_actor,
         constants.optimiser_critic: optimizer_critic,
@@ -70,6 +71,7 @@ def main():
     config_file.close()
     writer = SummaryWriter(log_dir=log_dir)
     agent = AgentDDPG(config)
+    # agent.load("/home/edoardo/PycharmProjects/ProximalPolicyOptimisation/runs/Aug13_12-07-33_DDPG Unity Reacher multi/checkpoint_140.pth")
     agent.train(env, writer, ending_condition)
     print("Finished.")
 
