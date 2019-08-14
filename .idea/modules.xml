@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/ProximalPolicyOptimisation.iml" filepath="$PROJECT_DIR$/.idea/ProximalPolicyOptimisation.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../drl_continuous_control/.idea/drl_continuous_control.iml" filepath="$PROJECT_DIR$/../drl_continuous_control/.idea/drl_continuous_control.iml" />
     </modules>
   </component>
 </project>
