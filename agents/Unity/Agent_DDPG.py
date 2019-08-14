@@ -11,7 +11,6 @@ from tensorboardX import SummaryWriter
 
 import constants
 from agents.GenericAgent import GenericAgent
-# from utility.PrioReplayBuffer import PrioReplayBuffer
 from utility.PrioritisedExperienceReplayBuffer import PrioritizedReplayBuffer
 
 
@@ -95,7 +94,7 @@ class AgentDDPG(GenericAgent):
 
         self.critic.train()
         self.actor.train()
-        td_error = y.detach() - Qs_a
+        td_error = y.detach() - Qs_a + 1e-5
         self.replay_buffer.update_priorities(indexes, abs(td_error).detach().cpu().numpy())
         loss_critic = td_error.pow(2) * is_values.detach()
         self.optimiser_critic.zero_grad()
@@ -181,7 +180,6 @@ class AgentDDPG(GenericAgent):
                 i_steps += n_agents
                 if dones.any():
                     break
-            # todo implement GAE
             scores_window.append(score)  # save most recent score
             scores.append(score)  # save most recent score
             writer.add_scalar('data/score', score, i_episode)
@@ -191,14 +189,10 @@ class AgentDDPG(GenericAgent):
             if (i_episode + 1) % 100 == 0:
                 print(f'\rEpisode {i_episode + 1}\tAverage Score: {np.mean(scores_window):.2f} ')
             if (i_episode + 1) % 10 == 0:
-                # torch.save(self.actor, os.path.join(self.log_dir, f"checkpoint_actor_{i_episode + 1}.pth"))
-                # torch.save(self.critic, os.path.join(self.log_dir, f"checkpoint_critic_{i_episode + 1}.pth"))
                 self.save(os.path.join(self.log_dir, f"checkpoint_{i_episode + 1}.pth"), i_episode)
             result = {"mean": np.mean(scores_window)}
             if ending_condition(result):
                 print(f'\nEnvironment solved in {i_episode - 100:d} episodes!\tAverage Score: {np.mean(scores_window):.2f}')
-                # torch.save(self.actor, os.path.join(self.log_dir, f"checkpoint_actor_success.pth"))
-                # torch.save(self.critic, os.path.join(self.log_dir, f"checkpoint_critic_success.pth"))
                 self.save(os.path.join(self.log_dir, f"checkpoint_success.pth"), i_episode)
                 break
         return scores
@@ -232,7 +226,6 @@ class AgentDDPG(GenericAgent):
             "target_critic": self.target_critic.state_dict(),
             "optimiser_actor": self.optimiser_actor.state_dict(),
             "optimiser_critic": self.optimiser_critic.state_dict(),
-            "replay_buffer": self.replay_buffer
         }, path)
 
     def load(self, path):
@@ -242,6 +235,7 @@ class AgentDDPG(GenericAgent):
         self.critic.load_state_dict(checkpoint["critic"])
         self.target_critic.load_state_dict(checkpoint["target_critic"])
         self.optimiser_actor.load_state_dict(checkpoint["optimiser_actor"])
-        self.optimiser_critic.load_state_dict(checkpoint["optimiser_criti"])
-        self.replay_buffer = checkpoint["optimiser_criti"]
+        self.optimiser_critic.load_state_dict(checkpoint["optimiser_critic"])
+        self.replay_buffer = checkpoint["optimiser_critic"]
         self.starting_episode = checkpoint["episode"]
+        print(f'Loading complete')

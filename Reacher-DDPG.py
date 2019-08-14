@@ -24,7 +24,7 @@ def main():
     seed = 2
     torch.manual_seed(seed)
     np.random.seed(seed)
-    worker_id = 3
+    worker_id = 0
     print(f'Worker_id={worker_id}')
     env = UnityEnvironment("./environment/Reacher_Linux_multi/Reacher.x86_64", worker_id=worker_id, seed=seed, no_graphics=True)
     brain = env.brains[env.brain_names[0]]
@@ -36,12 +36,9 @@ def main():
     comment = f"DDPG Unity Reacher multi"
     actor = Policy_actor(state_size, action_size).to(device)
     critic = Policy_critic(state_size + action_size).to(device)
-    # actor = torch.load("/home/edoardo/PycharmProjects/ProximalPolicyOptimisation/runs/Aug12_23-04-26_DDPG Unity Reacher multi/checkpoint_actor_359.pth")
-    # critic = torch.load("/home/edoardo/PycharmProjects/ProximalPolicyOptimisation/runs/Aug12_23-04-26_DDPG Unity Reacher multi/checkpoint_critic_359.pth")
     # actor.test(device)
     optimizer_actor = optim.Adam(actor.parameters(), lr=1e-4)
     optimizer_critic = optim.Adam(critic.parameters(), lr=1e-4)
-    # optimizer = optim.RMSprop(actor.parameters(),lr=1e-4)
     ending_condition = lambda result: result['mean'] >= 300.0
     log_dir = os.path.join('runs', current_time + '_' + comment)
     os.mkdir(log_dir)
@@ -60,9 +57,9 @@ def main():
         constants.gamma: 0.99,  # discount
         constants.tau: 0.001,  # soft merge
         constants.device: device,
-        constants.train_every: 120,
+        constants.train_every: 20*6,
         constants.train_n_times: 4,
-        constants.n_step_td: 2,
+        constants.n_step_td: 1,
         constants.ending_condition: ending_condition,
         constants.log_dir: log_dir
     }
@@ -71,7 +68,8 @@ def main():
     config_file.close()
     writer = SummaryWriter(log_dir=log_dir)
     agent = AgentDDPG(config)
-    # agent.load("/home/edoardo/PycharmProjects/ProximalPolicyOptimisation/runs/Aug13_12-07-33_DDPG Unity Reacher multi/checkpoint_140.pth")
+    # agent.save("/home/edoardo/PycharmProjects/ProximalPolicyOptimisation/runs/Aug13_16-46-32_DDPG Unity Reacher multi/checkpoint_50.pth",1)
+    # agent.load("/home/edoardo/PycharmProjects/ProximalPolicyOptimisation/runs/Aug13_16-46-32_DDPG Unity Reacher multi/checkpoint_50.pth")
     agent.train(env, writer, ending_condition)
     print("Finished.")
 
