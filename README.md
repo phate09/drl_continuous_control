@@ -2,7 +2,7 @@
 
 The project consists of training an agent to control an arm to reach a goal position
 
-The agent will navigate within the reacher Unity environment and has multiple degrees of freedom
+The agent will operate a robotic arm with two joints within the reacher Unity environment. The observation space consists of 33 variables corresponding to position, rotation, velocity, and angular velocities of the arm. Each action is a vector with 4 numbers, corresponding to torque applicable to two joints. Every entry in the action vector should be a number between -1 and 1.
 
 A positive reward is given when the agent reach a moving goal, so the aim of the agent is to reach the goal and keep the goal within reach for as much time as possible
 
