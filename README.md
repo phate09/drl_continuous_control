@@ -6,6 +6,8 @@ The agent will navigate within the reacher Unity environment and has multiple de
 
 A positive reward is given when the agent reach a moving goal, so the aim of the agent is to reach the goal and keep the goal within reach for as much time as possible
 
+The project is part of the Udacity deep learning course
+
 ## Table of contents
 
 
