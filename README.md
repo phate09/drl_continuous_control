@@ -34,7 +34,7 @@ move the 'Reacher_Linux' folder inside 'environment/'
 
 ## Running the code
 
-The project is divided in two sections: training & testing
+The project is divided in two sections: training & evaluation
 
 ### Training
 
@@ -46,20 +46,19 @@ python Reacher-DDPG.py
 The code will generate Tensorboard stats for visualisation. You can see them by running:
 ```tensorboard --logdir=runs``` from the ```drl_continuous_control``` folder
 
-### Testing
-The latest model from the agent will be saved in ```checkpoint.pth```.
-Rename ```checkpoint.pth``` into ```model.pth``` 
+### Evaluation
+During each run a snapshot of the agent is taken at regular intervals.
 
-To look at the agent in action run the following:
+To look at the agent in action using the previously saved model run the following:
 
 ```
-python replay_banana
+python Reacher-DDPG-evaluate.py
 ```
 
 ## Results
 Here is a video of the agent in action:
 
-https://youtu.be/uQFR3ll6CqM
+https://youtu.be/2kSd00ENSbI
 
 Here is a graph of the progression of the score from Tensorboard (up) and the average of the last 100 scores (down)
 ![alt text](images/tensorboard_continuous.png)

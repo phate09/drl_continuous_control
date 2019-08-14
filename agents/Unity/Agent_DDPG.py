@@ -48,7 +48,7 @@ class AgentDDPG(GenericAgent):
         self.train_every = config[constants.train_every]
         self.train_n_times = config[constants.train_n_times]
         self.replay_buffer = PrioritizedReplayBuffer(config[constants.buffer_size], alpha=0.6)
-        self.log_dir = config[constants.log_dir]
+        self.log_dir = config[constants.log_dir] if constants.log_dir in config else None
         self.n_step_td = config[constants.n_step_td]
         self.config = config
         self.starting_episode = 0  # used for loading checkpoints
@@ -195,6 +195,42 @@ class AgentDDPG(GenericAgent):
                 print(f'\nEnvironment solved in {i_episode - 100:d} episodes!\tAverage Score: {np.mean(scores_window):.2f}')
                 self.save(os.path.join(self.log_dir, f"checkpoint_success.pth"), i_episode)
                 break
+        return scores
+
+    def evaluate(self, env, n_episodes=1):
+        brain_name = env.brain_names[0]
+        scores = []  # list containing scores from each episode
+        scores_window = deque(maxlen=100)  # last 100 scores
+        i_steps = 0
+        self.actor.eval()
+        self.critic.eval()
+        for i_episode in range(n_episodes):
+            env_info = env.reset(train_mode=False)[brain_name]  # reset the environment
+            n_agents = len(env_info.agents)
+            states = torch.tensor(env_info.vector_observations, dtype=torch.float, device=self.device)  # get the current state
+            score = 0
+            self.actor.eval()
+            self.critic.eval()
+            for t in range(self.max_t):
+                with torch.no_grad():
+                    actions: torch.Tensor = self.actor(states)
+                    # noise = torch.normal(torch.zeros_like(actions), torch.ones_like(actions) * 0.2)
+                    noise = 0  # no noise during evaluation
+                    actions = torch.clamp(actions + noise, -1, 1)  # clips the action to the allowed boundaries
+                    env_info = env.step(actions.cpu().detach().numpy())[brain_name]  # send the action to the environment
+                    next_states = torch.tensor(env_info.vector_observations, dtype=torch.float, device=self.device)  # get the next state
+                    rewards = torch.tensor(env_info.rewards, dtype=torch.float, device=self.device).unsqueeze(dim=1)  # get the reward
+                    dones = torch.tensor(env_info.local_done, dtype=torch.uint8, device=self.device).unsqueeze(dim=1)  # see if episode has finished
+                states = next_states
+                score += rewards.mean().item()
+                i_steps += n_agents
+                if dones.any():
+                    break
+            scores_window.append(score)  # save most recent score
+            scores.append(score)  # save most recent score
+            print(f'\rEpisode {i_episode + 1}\tAverage Score: {np.mean(scores_window):.2f} ', end="")
+            if (i_episode + 1) % 100 == 0:
+                print(f'\rEpisode {i_episode + 1}\tAverage Score: {np.mean(scores_window):.2f} ')
         return scores
 
     def calculate_td_errors(self, states: torch.Tensor, actions: torch.Tensor, rewards: torch.Tensor, next_states: torch.Tensor) -> torch.Tensor:
